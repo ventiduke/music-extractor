@@ -37,24 +37,37 @@ Two engines produce note events; everything after that is shared.
 ## Song sketch
 
 `extract` gives the notes as played, flaws included. `sketch` turns them into
-something to build on: it finds the beat, drops stray blips, pulls strums onto
-the grid, and estimates the key and the pitch set over each stretch of beats.
+something to build on:
+
+- finds the beat (following the memo's tempo drift) and guesses the bar length
+- cleans the rhythm: each beat is read as eighths, sixteenths or triplets, and every strum lands on that division
+- estimates the key and the pitch set over each stretch of beats
+- generates a plain bass line, pad and drum part that follow the guitar
+- keeps it all in one editable file, with commands to change it
 
 ```
-uv run sketch build data/memos/idea.m4a       # -> out/idea.sketch.json, idea.tidy.mid, two previews
-uv run sketch render out/idea.sketch.json     # after editing the sketch
+uv run sketch build data/memos/idea.m4a          # -> out/idea.sketch.json, MIDI, previews
+uv run sketch show out/idea.sketch.json --bars 1-8
+uv run sketch edit out/idea.sketch.json transpose 2 --bars 5-8
+uv run sketch edit out/idea.sketch.json repeat 9-12
+uv run sketch edit out/idea.sketch.json thin --grid 1 --part guitar
+uv run sketch parts out/idea.sketch.json         # regenerate bass / pad / drums
+uv run sketch render out/idea.sketch.json        # after any edit
 ```
 
 | File | What it is |
 | --- | --- |
-| `idea.sketch.json` | The editable source of truth: tempo, beat grid, key, harmony, one note per line |
-| `idea.tidy.mid` | Tidied notes at a steady tempo, with tempo and time signature set, for a DAW |
-| `idea.tidy.steady.m4a` | The tidied notes alone at steady tempo |
-| `idea.tidy.split.m4a` | Memo in the left ear, tidied notes in the right, following the memo's timing |
+| `idea.sketch.json` | The editable source of truth: tempo, beat grid, key, harmony, every part one note per line |
+| `idea.clean.mid` | Rhythm-cleaned guitar at a steady tempo, for a DAW |
+| `idea.arr.mid` | Guitar, bass, pad and drums as four tracks |
+| `idea.clean.steady.m4a`, `idea.clean.split.m4a` | The cleaned notes alone; and beside the memo (memo left ear, notes right) |
+| `idea.arr.steady.m4a` | All four parts at steady tempo |
+| `idea.arr.memo.m4a` | Your original recording with bass, pad and drums following it |
+| `idea.tidy.*` | The earlier light-touch tidy, for comparison |
 
-Options on `build`: `--strength 0.5` moves notes only halfway to the grid,
-`--meter 3` for three beats per bar, `--downbeat-shift 1` moves the bar lines
-one beat later. `CLAUDE.md` describes the sketch format for editing by hand or by an agent.
+Options on `build`: `--meter 3` for three beats per bar, `--downbeat-shift 1`
+to move the bar lines one beat later, `--no-parts`. `CLAUDE.md` has the full
+edit list and the sketch format, for editing by hand or by an agent.
 
 ## Recording the data (Phase 0)
 

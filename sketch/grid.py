@@ -24,6 +24,7 @@ class Grid:
     meter: int  # beats per bar
     tempo_bpm: float  # typical tempo
     downbeat_confidence: float  # 0-1: how clearly beat 1 of the bar stood out
+    meter_confidence: float = 0.0  # 0-1: how clearly this bar length stood out (0 when it was given)
 
     def to_beats(self, t: float | np.ndarray) -> float | np.ndarray:
         bt = np.asarray(self.beat_times)
@@ -65,10 +66,22 @@ def _accents(times: np.ndarray, notes: list[NoteEvent]) -> np.ndarray:
     return change + 0.5 * loud / max(loud.max(), 1e-9)
 
 
-def find_grid(y: np.ndarray, notes: list[NoteEvent], meter: int = 4, downbeat_shift: int | None = None) -> Grid:
-    """Track beats in the audio, guess which beat is beat 1, and start bar 1 at the first note.
+def _bar_evidence(accents: np.ndarray, meter: int) -> tuple[int, float, float]:
+    """Best bar phase for a meter, how many standard errors it stands out by, and its lead over the runner-up."""
+    z = (accents - accents.mean()) / (accents.std() + 1e-9)
+    scores = np.array([z[k::meter].mean() * np.sqrt(len(z[k::meter])) for k in range(meter)])
+    ranked = np.sort(scores)[::-1]
+    return int(scores.argmax()), float(ranked[0]), float(ranked[0] - ranked[1])
 
-    `downbeat_shift` (0..meter-1) overrides the guess: it moves bar lines later by that many beats.
+
+def find_grid(
+    y: np.ndarray, notes: list[NoteEvent], meter: int | None = None, downbeat_shift: int | None = None
+) -> Grid:
+    """Track beats in the audio, guess the bar length and which beat is beat 1, and start bar 1 at the first note.
+
+    `meter` fixes the beats per bar. Left as None, 3 or 6 is chosen only when
+    the evidence for it is strong (3 standard errors and clearly ahead of 4);
+    otherwise 4. `downbeat_shift` moves the bar lines later by that many beats.
     """
     envelope = librosa.onset.onset_strength(y=y, sr=SR, hop_length=HOP)
     _, beats = librosa.beat.beat_track(onset_envelope=envelope, sr=SR, hop_length=HOP, units="time")
@@ -77,8 +90,8 @@ def find_grid(y: np.ndarray, notes: list[NoteEvent], meter: int = 4, downbeat_sh
         raise ValueError("could not find a steady beat in this recording")
     gap = float(np.median(np.diff(beats)))
     # Extend the tracked beats at the typical spacing to cover the whole memo.
-    before = beats[0] - gap * np.arange(int(beats[0] // gap) + meter, 0, -1)
-    after = beats[-1] + gap * np.arange(1, int((len(y) / SR - beats[-1]) // gap) + meter + 1)
+    before = beats[0] - gap * np.arange(int(beats[0] // gap) + 8, 0, -1)
+    after = beats[-1] + gap * np.arange(1, int((len(y) / SR - beats[-1]) // gap) + 8 + 1)
     times = np.concatenate([before, beats, after])
     # The tracker tends to sit a little behind or ahead of where notes start.
     # Slide the whole grid so the typical note lands exactly on an eighth.
@@ -87,10 +100,16 @@ def find_grid(y: np.ndarray, notes: list[NoteEvent], meter: int = 4, downbeat_sh
     times = times + offset * gap
 
     accents = _accents(times, notes)
-    strength = np.array([accents[k::meter].mean() for k in range(meter)])
-    phase = int(strength.argmax())
-    ranked = np.sort(strength)[::-1]
-    confidence = float((ranked[0] - ranked[1]) / ranked[0]) if ranked[0] > 0 else 0.0
+    meter_confidence = 0.0
+    if meter is None:
+        evidence = {m: _bar_evidence(accents, m) for m in (4, 3, 6)}
+        meter = 4
+        for m in (3, 6):
+            if evidence[m][1] >= 3.0 and evidence[m][1] >= evidence[meter][1] + 1.0:
+                meter = m
+        meter_confidence = round(float(np.clip(evidence[meter][1] / 4.0, 0.0, 1.0)), 2)
+    phase, _, lead = _bar_evidence(accents, meter)
+    confidence = float(np.clip(lead / 3.0, 0.0, 1.0))
     if downbeat_shift is not None:
         phase = (phase + downbeat_shift) % meter
 
@@ -107,4 +126,5 @@ def find_grid(y: np.ndarray, notes: list[NoteEvent], meter: int = 4, downbeat_sh
         meter=meter,
         tempo_bpm=round(60.0 / gap, 1),
         downbeat_confidence=round(confidence, 2),
+        meter_confidence=meter_confidence,
     )

@@ -1,46 +1,111 @@
-"""Command line: `sketch build memo.m4a`, then `sketch render out/memo.sketch.json` after edits."""
+"""Command line for the song sketch.
+
+    sketch build memo.m4a                      memo -> sketch, MIDI, previews
+    sketch show out/memo.sketch.json           bar-by-bar text summary
+    sketch edit out/memo.sketch.json OP ...    transpose, velocity, clear, thin, repeat, delete, tempo
+    sketch parts out/memo.sketch.json          regenerate bass / pad / drums from the guitar
+    sketch render out/memo.sketch.json         sketch -> MIDI and previews (after any edit)
+"""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
+PART_CHOICES = ("guitar", "bass", "pad", "drums", "all")
+
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="sketch", description=__doc__)
+    parser = argparse.ArgumentParser(prog="sketch", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    b = sub.add_parser("build", help="memo -> sketch JSON, tidied MIDI and previews")
+    b = sub.add_parser("build", help="memo -> sketch JSON, MIDI and previews")
     b.add_argument("audio", nargs="+", type=Path)
     b.add_argument("--out", type=Path, default=Path("out"))
-    b.add_argument("--meter", type=int, default=4, help="beats per bar (default 4)")
+    b.add_argument("--meter", type=int, default=None, help="beats per bar (default: guess, usually 4)")
     b.add_argument("--downbeat-shift", type=int, default=None, help="move bar lines later by this many beats")
-    b.add_argument("--strength", type=float, default=1.0, help="1 = snap fully to the grid, 0 = keep played timing")
+    b.add_argument("--no-parts", action="store_true", help="skip the generated bass, pad and drums")
     b.add_argument("--no-previews", action="store_true")
 
-    r = sub.add_parser("render", help="sketch JSON (after editing) -> tidied MIDI and previews")
+    r = sub.add_parser("render", help="sketch JSON -> MIDI and previews")
     r.add_argument("sketch", nargs="+", type=Path)
     r.add_argument("--no-previews", action="store_true")
 
+    s = sub.add_parser("show", help="bar-by-bar text summary")
+    s.add_argument("sketch", type=Path)
+    s.add_argument("--bars", help="e.g. 5-8")
+
+    p = sub.add_parser("parts", help="regenerate bass / pad / drums from the guitar notes")
+    p.add_argument("sketch", type=Path)
+    p.add_argument("--only", nargs="+", choices=("bass", "pad", "drums"), default=["bass", "pad", "drums"])
+
+    e = sub.add_parser("edit", help="change the sketch; run `render` afterwards to hear it")
+    e.add_argument("sketch", type=Path)
+    ops = e.add_subparsers(dest="op", required=True)
+
+    def scoped(name: str, text: str, default_part: str = "all") -> argparse.ArgumentParser:
+        op = ops.add_parser(name, help=text)
+        op.add_argument("--bars", help="e.g. 5-8 (default: whole song)")
+        op.add_argument("--part", nargs="+", choices=PART_CHOICES, default=[default_part])
+        return op
+
+    scoped("transpose", "move pitches up or down").add_argument("semitones", type=int)
+    scoped("velocity", "louder or softer").add_argument("scale", type=float)
+    scoped("clear", "remove the notes in these bars")
+    t = scoped("thin", "keep only on-grid and/or loud notes", default_part="guitar")
+    t.add_argument("--grid", type=float, help="keep notes starting on multiples of this many beats (1 = on the beat)")
+    t.add_argument("--min-velocity", type=float, help="keep notes at least this loud (0-1)")
+    rep = ops.add_parser("repeat", help="play these bars again right after themselves")
+    rep.add_argument("bars")
+    rep.add_argument("--times", type=int, default=1)
+    ops.add_parser("delete", help="cut these bars out").add_argument("bars")
+    ops.add_parser("tempo", help="set the steady tempo").add_argument("bpm", type=float)
+
     args = parser.parse_args(argv)
     from . import build as sk
+    from . import edit
 
     if args.command == "build":
         for audio in args.audio:
-            sketch = sk.build(audio, meter=args.meter, downbeat_shift=args.downbeat_shift, strength=args.strength)
+            sketch = sk.build(audio, meter=args.meter, downbeat_shift=args.downbeat_shift, parts=not args.no_parts)
             path = sk.write(sketch, args.out / f"{audio.stem}.sketch.json")
-            key = sketch["key"]
-            print(
-                f"{audio.name}: {sketch['tempo_bpm']} bpm, {sketch['bars']} bars of {sketch['meter']}, "
-                f"{key['tonic']} {key['mode']}, {len(sketch['notes'])} notes kept, {len(sketch['dropped'])} dropped"
-            )
-            for made in [path, *sk.render(path, previews=not args.no_previews)]:
+            print(edit.overview(sketch).split("\n")[0])
+            for made in [path, *sk.render(path, previews=not args.no_previews, light=True)]:
                 print(f"  {made}")
-    else:
+    elif args.command == "render":
         for path in args.sketch:
-            sk.write(sk.refresh(sk.read(path)[0]), path)
+            sk.write(sk.refresh(sk.read(path)), path)
             for made in sk.render(path, previews=not args.no_previews):
                 print(f"  {made}")
+    elif args.command == "show":
+        print(edit.overview(sk.refresh(sk.read(args.sketch)), args.bars))
+    elif args.command == "parts":
+        sketch = sk.refresh(sk.read(args.sketch))
+        edit.regenerate(sketch, only=tuple(args.only))
+        sk.write(sk.refresh(sketch), args.sketch)
+        print(f"regenerated {', '.join(args.only)}")
+    else:
+        sketch = sk.refresh(sk.read(args.sketch))
+        parts = tuple(getattr(args, "part", ()))
+        if args.op == "transpose":
+            print(f"{edit.transpose(sketch, args.semitones, args.bars, parts)} notes transposed")
+        elif args.op == "velocity":
+            print(f"{edit.velocity(sketch, args.scale, args.bars, parts)} notes changed")
+        elif args.op == "clear":
+            print(f"{edit.clear(sketch, args.bars, parts)} notes removed")
+        elif args.op == "thin":
+            if args.grid is None and args.min_velocity is None:
+                raise SystemExit("thin needs --grid and/or --min-velocity")
+            print(f"{edit.thin(sketch, args.grid, args.min_velocity, args.bars, parts)} notes removed")
+        elif args.op == "repeat":
+            edit.repeat(sketch, args.bars, args.times)
+        elif args.op == "delete":
+            edit.delete(sketch, args.bars)
+        elif args.op == "tempo":
+            edit.tempo(sketch, args.bpm)
+        sketch = sk.refresh(sketch)
+        sk.write(sketch, args.sketch)
+        print(edit.overview(sketch).split("\n")[0])
 
 
 if __name__ == "__main__":
