@@ -24,6 +24,11 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("--out", type=Path, default=Path("out"))
     b.add_argument("--meter", type=int, default=None, help="beats per bar (default: guess, usually 4)")
     b.add_argument("--downbeat-shift", type=int, default=None, help="move bar lines later by this many beats")
+    b.add_argument(
+        "--beats", type=Path, default=None,
+        help="tapped-beat file (default: data/beats/NAME.beats.json if it exists; --no-beats ignores it)",
+    )
+    b.add_argument("--no-beats", action="store_true", help="use the automatic beat tracker even if taps exist")
     b.add_argument("--no-parts", action="store_true", help="skip the generated bass, pad and drums")
     b.add_argument("--no-previews", action="store_true")
 
@@ -67,7 +72,12 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "build":
         for audio in args.audio:
-            sketch = sk.build(audio, meter=args.meter, downbeat_shift=args.downbeat_shift, parts=not args.no_parts)
+            beats = args.beats or Path("data/beats") / f"{audio.stem}.beats.json"
+            beats = beats if beats.exists() and not args.no_beats else None
+            sketch = sk.build(
+                audio, meter=args.meter, downbeat_shift=args.downbeat_shift, parts=not args.no_parts, beats=beats
+            )
+            print(f"beat grid from {'your taps (' + str(beats) + ')' if beats else 'the automatic tracker'}")
             path = sk.write(sketch, args.out / f"{audio.stem}.sketch.json")
             print(edit.overview(sketch).split("\n")[0])
             for made in [path, *sk.render(path, previews=not args.no_previews, light=True)]:

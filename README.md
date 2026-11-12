@@ -69,6 +69,16 @@ Options on `build`: `--meter 3` for three beats per bar, `--downbeat-shift 1`
 to move the bar lines one beat later, `--no-parts`. `CLAUDE.md` has the full
 edit list and the sketch format, for editing by hand or by an agent.
 
+### Laying down the beat yourself
+
+The automatic beat is a guess, and it guesses badly when the tempo moves, the
+playing is syncopated, or your foot taps in 2 while the strumming is in 3.
+The Beat Tapper page (`web/beat_tapper.html`, published as a private Claude
+artifact) plays a memo and records your taps, how many taps make a bar, and
+whether each tap divides in two or three. Saved as
+`data/beats/NAME.beats.json`, the taps replace the automatic grid the next
+time `sketch build` runs on that memo.
+
 ## Recording the data (Phase 0)
 
 | Folder | What goes in it |

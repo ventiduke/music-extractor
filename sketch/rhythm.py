@@ -26,6 +26,8 @@ FEELS: dict[str, tuple[float, ...]] = {
 # Set so that one strum played a little late stays an eighth, while two strums
 # a sixteenth apart, or a pair on the triplet points, do change the feel.
 FEEL_COST = {"eighths": 0.0, "sixteenths": 0.030, "triplets": 0.035}
+# When the beat is known to divide in three (tapped that way), triplets are the plain choice.
+FEEL_COST_TRIPLE = {"triplets": 0.0, "eighths": 0.030, "sixteenths": 0.045}
 MERGE_COST = 0.05  # two separate strums landing on the same slot
 SWITCH_COST = 0.010  # changing feel between neighbouring beats
 MIN_LENGTH = {"eighths": 0.25, "sixteenths": 0.25, "triplets": 1 / 3}
@@ -38,9 +40,11 @@ def _snap(position: float, feel: str) -> float:
     return float(min(points, key=lambda p: abs(p - position)))
 
 
-def choose_feels(positions: list[float], n_beats: int) -> list[str]:
+def choose_feels(positions: list[float], n_beats: int, division: int = 2) -> list[str]:
     """One feel per beat, by dynamic programming over fit + simplicity + continuity."""
     names = list(FEELS)
+    feel_cost = FEEL_COST_TRIPLE if division == 3 else FEEL_COST
+    plain = "triplets" if division == 3 else "eighths"
     in_beat: dict[int, list[float]] = {}
     for position in positions:
         if 0 <= int(position) < n_beats:
@@ -51,7 +55,7 @@ def choose_feels(positions: list[float], n_beats: int) -> list[str]:
             slots = [_snap(p, name) for p in here]
             fit = sum((p - s) ** 2 for p, s in zip(here, slots))
             merged = len(slots) - len(set(slots))  # separate strums forced onto one slot
-            cost[beat, j] = fit + MERGE_COST * merged + FEEL_COST[name]
+            cost[beat, j] = fit + MERGE_COST * merged + feel_cost[name]
     best = cost[0].copy()
     back = np.zeros((n_beats, len(names)), dtype=int)
     for b in range(1, n_beats):
@@ -61,12 +65,15 @@ def choose_feels(positions: list[float], n_beats: int) -> list[str]:
     path = [int(best.argmin())]
     for b in range(n_beats - 1, 0, -1):
         path.append(int(back[b, path[-1]]))
-    # Beats nobody plays in have no feel of their own: call them eighths.
-    return [names[j] if beat in in_beat else "eighths" for beat, j in enumerate(reversed(path))]
+    # Beats nobody plays in have no feel of their own: give them the plain one.
+    return [names[j] if beat in in_beat else plain for beat, j in enumerate(reversed(path))]
 
 
-def clean(notes: list[NoteEvent], grid: Grid) -> tuple[list[SketchNote], list[str]]:
-    """Returns (cleaned notes, feel per beat). Short quiet blips are left out, as in the light tidy."""
+def clean(notes: list[NoteEvent], grid: Grid, division: int = 2) -> tuple[list[SketchNote], list[str]]:
+    """Returns (cleaned notes, feel per beat). Short quiet blips are left out, as in the light tidy.
+
+    `division` 3 means the beat is known to divide in three, so triplets are preferred over eighths.
+    """
     kept = sorted(
         (n for n in notes if not (n.end - n.start < BLIP_SECONDS and n.velocity < BLIP_VELOCITY)),
         key=lambda n: (n.start, n.pitch),
@@ -79,7 +86,7 @@ def clean(notes: list[NoteEvent], grid: Grid) -> tuple[list[SketchNote], list[st
             strums.append([n])
     n_beats = len(grid.beat_times) - 1
     played = [float(grid.to_beats(s[0].start)) for s in strums]
-    feels = choose_feels(played, n_beats)
+    feels = choose_feels(played, n_beats, division)
 
     def feel_at(position: float) -> str:
         return feels[int(np.clip(position, 0, n_beats - 1))]
