@@ -88,6 +88,7 @@ function songMenu() {
     { label: "New song from a recording…", run: () => import("./capture.js").then((m) => m.startCapture(adopt)).catch(() => toast("Recording import could not be loaded.", true)) },
     { label: "Open a song file…", run: () => $("importJson").click() }, "-",
     { label: "Save a song file", hint: "to keep or share", run: () => store.download(fileName() + ".project.json", JSON.stringify(app.project), "application/json") },
+    { label: "Finish it in Suno…", hint: "audio + style prompt", run: () => import("./handoff.js").then((m) => m.finishElsewhere()) },
     { label: "Export audio (WAV)", run: exportAudio }, { label: "Export MIDI", run: () => store.download(fileName() + ".mid", toMidi(app.project), "audio/midi") }, "-",
     { label: "Revert to the original", disabled: !(current && current.bundled && current.edited), run: async () => { const id = app.project.id; store.forgetSong(id); await refreshSongs(); openSong(id, true); } },
     { label: "Delete this song from this browser", disabled: !(current && !current.bundled), run: async () => { store.forgetSong(app.project.id); await refreshSongs(); if (songs.length) openSong(songs[0].id); else adopt(blank()); } },
