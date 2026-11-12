@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>music-extractor</title>
+<style>
+  :root { --bg: #f1f2ef; --fg: #1c201b; --muted: #636a60; --line: #d5d8d1; --panel: #fff; --sel: #1f7a4d; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #141714; --fg: #e7eae3; --muted: #99a196; --line: #333932; --panel: #1d211d; --sel: #5fce94; color-scheme: dark; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 48px 20px; }
+  h1 { font-size: 28px; margin: 0 0 8px; } p { color: var(--muted); margin: 0 0 24px; }
+  a.card { display: block; padding: 16px 18px; margin-bottom: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; color: inherit; text-decoration: none; }
+  a.card:hover, a.card:focus-visible { border-color: var(--sel); outline: none; }
+  a.card b { display: block; font-size: 18px; } a.card span { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>music-extractor</h1>
+  <p>Turn a guitar voice memo into notes, chords, tempo and time signature, then build a song from them.</p>
+  <a class="card" href="web/editor/"><b>Song Workbench</b><span>The editor: sections, tempo and signature blocks, tracks, a piano roll, chords, scales and keys. Best on a computer.</span></a>
+  <a class="card" href="https://github.com/ventiduke/music-extractor"><b>Source and notes</b><span>The extraction code and how the pieces fit together.</span></a>
+</main>
+</body>
+</html>

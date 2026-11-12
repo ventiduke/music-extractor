@@ -42,6 +42,8 @@ def main(argv: list[str] | None = None) -> None:
 
     x = sub.add_parser("project", help="sketch -> song project for the editor (bars, tracks, chords, scales)")
     x.add_argument("sketch", nargs="+", type=Path)
+    x.add_argument("--title", help="song title shown in the editor (default: the memo's file name)")
+    x.add_argument("--publish", action="store_true", help="also bundle the song with the web editor (web/editor/projects)")
 
     p = sub.add_parser("parts", help="regenerate bass / pad / drums from the guitar notes")
     p.add_argument("sketch", type=Path)
@@ -99,11 +101,15 @@ def main(argv: list[str] | None = None) -> None:
 
         for path in args.sketch:
             project = pj.from_sketch(sk.refresh(sk.read(path)))
+            if args.title:
+                project["title"] = args.title
             out = pj.write(project, path.with_name(path.name.removesuffix(".sketch.json") + ".project.json"))
-            print(f"{out}: {len(project['bars'])} bars, {len(project['sections'])} sections, {len(project['tracks'])} tracks")
+            print(f"{out}: {project['bars']} bars, {len(project['sections'])} sections, {len(project['tracks'])} tracks")
+            if args.publish:
+                print(f"  bundled with the editor: {pj.publish(project, Path('web/editor/projects'))}")
             print("  chords: " + ", ".join(f"{c['name']} ({c['beats']} beats)" for c in project["chords"][:10]))
             print("  scales: " + ", ".join(
-                f"{s['name']} {s['fit']:.0%}" + ("" if s["bars"] == [1, len(project["bars"])] else f" in bars {s['bars'][0]}-{s['bars'][1]}")
+                f"{s['name']} {s['fit']:.0%}" + ("" if s["bars"] == [1, project["bars"]] else f" in bars {s['bars'][0]}-{s['bars'][1]}")
                 for s in project["scales"]
             ))
     elif args.command == "show":

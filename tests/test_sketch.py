@@ -343,11 +343,12 @@ def test_project_export_places_notes_in_bars(built, tmp_path, capsys):
     cli.main(["project", str(copy)])
     project = json.loads((tmp_path / "memo.project.json").read_text())
     sketch = json.loads(copy.read_text())
-    assert len(project["bars"]) == sketch["bars"] and project["bars"][0]["beats"] == 4 and project["bars"][0]["division"] == 2
-    assert project["bars"][2]["bpm"] == 90 and project["bars"][0]["bpm"] != 90
+    assert project["version"] == 2 and project["bars"] == sketch["bars"]
+    assert project["signature"] == [{"bar": 0, "beats": 4, "division": 2}]
+    assert {"bar": 2, "bpm": 90.0} in project["tempo"] and project["tempo"][0]["bar"] == 0 and project["tempo"][0]["bpm"] != 90
     assert [t["id"] for t in project["tracks"]] == ["guitar", "bass", "pad", "drums"] and project["tracks"][3]["kind"] == "drums"
     first = sketch["notes"][0]
     assert project["tracks"][0]["notes"][0] == [first["bar"] - 1, first["beat_in_bar"] - 1, first["length"], first["pitch"], first["velocity"]]
     assert all(0 <= n[1] < 4 for t in project["tracks"] for n in t["notes"])
-    assert project["sections"][0] == {"name": "Part 1", "bar": 0} and len(project["sections"]) >= 2
+    assert project["sections"][0] == {"bar": 0, "name": "Part 1"} and len(project["sections"]) >= 2
     assert project["chords"] and project["scales"] and "chords:" in capsys.readouterr().out
