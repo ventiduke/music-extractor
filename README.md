@@ -34,6 +34,28 @@ Two engines produce note events; everything after that is shared.
 | `model` (default) | Basic Pitch note model |
 | `dsp` | Constant-Q spectrum at 3 bins per semitone, harmonic summation, hold-until-it-changes stitching. No model, so every decision can be inspected. |
 
+## Song sketch
+
+`extract` gives the notes as played, flaws included. `sketch` turns them into
+something to build on: it finds the beat, drops stray blips, pulls strums onto
+the grid, and estimates the key and the pitch set over each stretch of beats.
+
+```
+uv run sketch build data/memos/idea.m4a       # -> out/idea.sketch.json, idea.tidy.mid, two previews
+uv run sketch render out/idea.sketch.json     # after editing the sketch
+```
+
+| File | What it is |
+| --- | --- |
+| `idea.sketch.json` | The editable source of truth: tempo, beat grid, key, harmony, one note per line |
+| `idea.tidy.mid` | Tidied notes at a steady tempo, with tempo and time signature set, for a DAW |
+| `idea.tidy.steady.m4a` | The tidied notes alone at steady tempo |
+| `idea.tidy.split.m4a` | Memo in the left ear, tidied notes in the right, following the memo's timing |
+
+Options on `build`: `--strength 0.5` moves notes only halfway to the grid,
+`--meter 3` for three beats per bar, `--downbeat-shift 1` moves the bar lines
+one beat later. `CLAUDE.md` describes the sketch format for editing by hand or by an agent.
+
 ## Recording the data (Phase 0)
 
 | Folder | What goes in it |
