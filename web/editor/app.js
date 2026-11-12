@@ -1,5 +1,6 @@
 // Shared editor state, undo, and change notification. Views read `app` and call `emit()`.
 import { layout, migrate } from "./model.js";
+import { detectProgression } from "./tools.js";
 
 export const HEAD_W = 190; // width of the left column (track headers / piano keys)
 
@@ -9,6 +10,7 @@ export const app = {
   view: { ppb: 36, scrollX: 0, snap: 0.5, tool: "draw", noteLen: 1 },
   playhead: 0, loop: { on: false, a: 0, b: 0 },
   brush: null, // chord pitches picked up for drawing
+  stamp: null, // a pattern picked up for stamping: {name, kind, length, notes}
   scale: -1, scaleLock: false,
   held: [], typing: false, stepRecord: false, keyBase: 48,
   clip: null, undo: [], redo: [],
@@ -24,7 +26,8 @@ export const scalePcs = () => (app.scale >= 0 && app.project.scales[app.scale] ?
 export function open(project) {
   app.project = migrate(project); app.L = layout(app.project);
   app.sel = { track: 0, notes: new Set(), bars: null, block: null };
-  app.playhead = 0; app.loop = { on: false, a: 0, b: 0 }; app.brush = null; app.held = [];
+  app.playhead = 0; app.loop = { on: false, a: 0, b: 0 }; app.brush = null; app.stamp = null; app.held = [];
+  if (!app.project.progression.length) { const src = app.project.tracks.find((t) => t.kind !== "drums" && t.notes.length); if (src) app.project.progression = detectProgression(app.project, src.id); }
   app.scale = app.project.scales.length ? 0 : -1; app.undo = []; app.redo = []; app.dirty = false; app.view.scrollX = 0;
   emit("open");
 }
@@ -50,7 +53,7 @@ function clampSelection() {
   app.sel.track = Math.max(0, Math.min(app.sel.track, p.tracks.length - 1));
   const n = track().notes.length; for (const i of [...app.sel.notes]) if (i >= n) app.sel.notes.delete(i);
   if (app.sel.bars) { app.sel.bars.a = Math.min(app.sel.bars.a, p.bars - 1); app.sel.bars.b = Math.min(app.sel.bars.b, p.bars - 1); }
-  if (app.sel.block && app.sel.block.index >= p[app.sel.block.lane].length) app.sel.block = null;
+  if (app.sel.block && app.sel.block.index >= (app.sel.block.lane === "chords" ? p.progression : p[app.sel.block.lane]).length) app.sel.block = null;
   app.playhead = Math.max(0, Math.min(app.playhead, app.L.total));
 }
 function restore(from, to) {

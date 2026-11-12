@@ -1,87 +1,82 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Song Workbench</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2316191c'/%3E%3Cpath d='M7 21h5M7 16h9M7 11h13M22 22V9l4-1' stroke='%234cc38a' stroke-width='2.4' stroke-linecap='round' fill='none'/%3E%3Ccircle cx='20' cy='22' r='2.6' fill='%23ff9f43'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
 <link rel="stylesheet" href="style.css">
+<script>try { document.documentElement.dataset.theme = localStorage.getItem("mx.theme") || "dark"; } catch (e) {}</script>
 </head>
 <body>
 <header id="top">
-  <div class="bar">
-    <strong class="brand">Song Workbench</strong>
-    <label class="f">Song <select id="song"></select></label>
-    <label class="f">Title <input id="title" type="text"></label>
-    <button id="newSong" type="button">New</button>
-    <label class="filebtn">Import<input id="importJson" type="file" accept=".json,application/json" hidden></label>
-    <button id="exportJson" type="button" title="Save the song as a file you can keep, share or send to Claude">Export song</button>
-    <button id="exportMidi" type="button" title="A MIDI file for another music program">Export MIDI</button>
-    <button id="revert" type="button" disabled title="Throw away your edits to this song and reload the original">Revert to original</button>
+  <div class="tb">
+    <span class="brand"><svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--soft)"/><path d="M7 21h5M7 16h9M7 11h13M22 22V9l4-1" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round" fill="none"/><circle cx="20" cy="22" r="2.6" fill="var(--hot)"/></svg>Song Workbench</span>
+    <button id="songMenu" type="button" class="menu-btn" title="Songs, new, import and export"><span id="songName">Song</span></button>
+    <input id="title" type="text" aria-label="Song title" title="Song title">
     <span id="status" role="status"></span>
   </div>
-  <div class="bar">
-    <button id="rewind" type="button" title="Back to the start (Home)">⏮</button>
-    <button id="play" type="button" class="primary" title="Play or stop (Space)">▶ Play</button>
-    <button id="loop" type="button" aria-pressed="false" title="Loop the range dragged on the bar numbers (L)">Loop</button>
-    <button id="metro" type="button" aria-pressed="false" title="Click on every beat">Click</button>
-    <span id="position" title="Bar . beat">1 . 1.00</span>
-    <span class="sep"></span>
+  <div class="tb transport">
+    <button id="rewind" type="button" class="ib" title="Back to the start (Home)" aria-label="Back to the start"></button>
+    <button id="play" type="button" class="ib play" title="Play or stop (Space)" aria-label="Play"></button>
+    <button id="loop" type="button" class="ib" aria-pressed="false" title="Loop the range dragged on the bar numbers (L)" aria-label="Loop"></button>
+    <button id="metro" type="button" class="ib" aria-pressed="false" title="Click on every beat" aria-label="Metronome"></button>
+    <div id="posbox" title="Bar . beat, time, and the tempo and time signature at the playhead"><b id="position">1 . 1.00</b><span id="posTime">0:00</span><span id="posInfo"></span></div>
+    <div id="masterMeter" class="meter wide" title="Output level"><i></i></div>
+  </div>
+  <div class="tb right">
     <span class="group" role="group" aria-label="Tool">
-      <button id="toolDraw" type="button" aria-pressed="true" title="Draw notes (B)">Draw</button><button id="toolSelect" type="button" aria-pressed="false" title="Select notes (V)">Select</button>
+      <button id="toolDraw" type="button" class="ib" aria-pressed="true" title="Draw notes (B)" aria-label="Draw"></button><button id="toolSelect" type="button" class="ib" aria-pressed="false" title="Select notes (V)" aria-label="Select"></button>
     </span>
     <label class="f">Snap <select id="snap" title="What notes snap to, as a share of a beat"></select></label>
     <label class="f">Length <select id="noteLen" title="Length of the next note you draw or type, in beats"></select></label>
     <span class="sep"></span>
-    <button id="undo" type="button" title="Undo (Ctrl+Z)">Undo</button><button id="redo" type="button" title="Redo (Ctrl+Shift+Z)">Redo</button>
-    <button id="zoomOut" type="button" title="Zoom out (Ctrl + scroll)">−</button><button id="zoomIn" type="button" title="Zoom in (Ctrl + scroll)">+</button>
+    <button id="undo" type="button" class="ib" title="Undo (Ctrl+Z)" aria-label="Undo"></button><button id="redo" type="button" class="ib" title="Redo (Ctrl+Shift+Z)" aria-label="Redo"></button>
+    <button id="zoomOut" type="button" class="ib" title="Zoom out (Ctrl + scroll)" aria-label="Zoom out"></button><button id="zoomIn" type="button" class="ib" title="Zoom in (Ctrl + scroll)" aria-label="Zoom in"></button>
+    <span class="sep"></span>
+    <button id="tools" type="button" title="Write parts from the chords, or reshape what is selected"></button>
+    <button id="askAi" type="button" title="Ask the assistant to change the song"></button>
+    <button id="theme" type="button" class="ib" title="Light or dark" aria-label="Light or dark"></button>
+    <button id="help" type="button" class="ib" title="Shortcuts" aria-label="Shortcuts"></button>
   </div>
 </header>
 <div id="context" aria-live="polite"></div>
 <div id="work">
   <main id="main">
-    <div id="arrScroll"><div id="heads"></div><canvas id="arr" aria-label="Arrangement: section, tempo and signature blocks, the bar ruler, and one lane per track"></canvas></div>
-    <div id="hrow">
-      <div class="headpad"><button id="addTrack" type="button">+ Track</button><button id="addDrums" type="button">+ Drums</button></div>
-      <div id="hscroll"><div id="hspace"></div></div>
-    </div>
-    <div id="rollScroll"><canvas id="rollKeys" aria-label="Piano keys: click to hear a note"></canvas><canvas id="roll" aria-label="Note grid for the chosen track"></canvas></div>
+    <div id="arrScroll"><div id="heads"></div><canvas id="arr" aria-label="Arrangement: section, chord, tempo and signature blocks, the bar ruler, and one lane per track"></canvas></div>
+    <div id="split" title="Drag to resize" role="separator" aria-orientation="horizontal"></div>
+    <div id="hrow"><div class="headpad" id="rollTitle">Notes</div><div id="hscroll"><div id="hspace"></div></div></div>
+    <div id="rollScroll"><canvas id="rollKeys" aria-label="Piano keys: click to hear and hold a note"></canvas><canvas id="roll" aria-label="Note grid for the chosen track"></canvas></div>
+    <div id="velRow"><div class="headpad">Loudness</div><canvas id="vel" aria-label="Loudness of each note: drag to change"></canvas></div>
   </main>
   <aside id="side">
+    <div id="tabs" class="rowx" role="tablist">
+      <button type="button" data-tab="chords" aria-pressed="true">Chords</button><button type="button" data-tab="scales" aria-pressed="false">Scales</button><button type="button" data-tab="patterns" aria-pressed="false">Patterns</button><button type="button" data-tab="assistant" aria-pressed="false">Assistant</button>
+    </div>
+    <section id="tab-chords" class="tab"><div id="chords" class="list"></div><div id="family"></div></section>
+    <section id="tab-scales" class="tab" hidden><div id="scales" class="list"></div><h3>Add a scale</h3><div id="scaleAdd" class="rowx"></div><button id="scaleLock" type="button" aria-pressed="false">Keep drawn notes inside the scale</button></section>
+    <section id="tab-patterns" class="tab" hidden><div id="patterns" class="list"></div><button id="patternSave" type="button">Save selection as a pattern</button></section>
+    <section id="tab-assistant" class="tab" hidden><div id="assistant"></div></section>
     <section class="keysbox">
-      <div class="rowx"><h2>Keys</h2>
-        <button id="typing" type="button" aria-pressed="false" title="Play notes from the computer keyboard: A W S E D F T G Y H U J K. Z and X change octave. (Q)">Type notes</button>
-        <button id="stepRecord" type="button" aria-pressed="false" title="When on, letting go of the keys writes them at the playhead and steps forward (R)">Step record</button></div>
+      <div class="rowx"><h3>Keys</h3>
+        <button id="typing" type="button" class="small" aria-pressed="false" title="Play notes from the computer keyboard: A W S E D F T G Y H U J K. Z and X change octave. (Q)">Type notes</button>
+        <button id="stepRecord" type="button" class="small" aria-pressed="false" title="When on, letting go of the keys writes them at the playhead and steps forward (R)">Step record</button></div>
       <div id="keys"></div>
       <div id="heldName"></div>
       <div class="rowx">
-        <button id="octDown" type="button" title="Octave down (Z while typing)">Oct −</button><button id="octUp" type="button" title="Octave up (X while typing)">Oct +</button>
-        <button id="heldPlay" type="button">Play</button>
-        <button id="heldInsert" type="button" title="Write the held notes at the playhead and step forward (Enter)">Insert</button>
-        <button id="heldBrush" type="button" title="Pick the held notes up to draw with">Draw with</button>
-        <button id="heldSave" type="button" title="Add to the chord list; you can name it there">Save chord</button>
-        <button id="heldClear" type="button">Clear</button>
+        <button id="octDown" type="button" class="small" title="Octave down (Z while typing)">Oct −</button><button id="octUp" type="button" class="small" title="Octave up (X while typing)">Oct +</button>
+        <button id="heldPlay" type="button" class="small">Play</button>
+        <button id="heldInsert" type="button" class="small" title="Write the held notes at the playhead and step forward (Enter)">Insert</button>
+        <button id="heldBrush" type="button" class="small" title="Pick the held notes up to draw with">Draw with</button>
+        <button id="heldSave" type="button" class="small" title="Add to the chord list; you can name it there">Save chord</button>
+        <button id="heldClear" type="button" class="small">Clear</button>
       </div>
-    </section>
-    <div id="tabs" class="rowx"><button type="button" data-tab="chords" aria-pressed="true">Chords</button><button type="button" data-tab="scales" aria-pressed="false">Scales</button><button type="button" data-tab="help" aria-pressed="false">Shortcuts</button></div>
-    <section id="tab-chords"><div id="chords"></div></section>
-    <section id="tab-scales" hidden><div id="scales"></div><button id="scaleLock" type="button" aria-pressed="false">Keep drawn notes inside the scale</button></section>
-    <section id="tab-help" hidden>
-      <table class="keysheet">
-        <tr><td>Space</td><td>Play / stop</td></tr><tr><td>B, V</td><td>Draw tool, select tool</td></tr>
-        <tr><td>Drag a note</td><td>Move it; up or down changes pitch</td></tr><tr><td>Drag a note's edge</td><td>Make it longer or shorter</td></tr>
-        <tr><td>Right-click a note</td><td>Delete it</td></tr><tr><td>Arrows</td><td>Nudge selected notes (Shift+↑↓: an octave)</td></tr>
-        <tr><td>Ctrl+C, V, D</td><td>Copy, paste at the playhead, repeat</td></tr><tr><td>Ctrl+A</td><td>Select every note on the track</td></tr>
-        <tr><td>Delete</td><td>Delete what is selected</td></tr><tr><td>Ctrl+Z, Ctrl+Shift+Z</td><td>Undo, redo</td></tr>
-        <tr><td>M, S</td><td>Mute, solo the chosen track</td></tr><tr><td>1–9</td><td>Choose a track</td></tr>
-        <tr><td>L</td><td>Loop on / off</td></tr><tr><td>Q</td><td>Type notes on / off</td></tr>
-        <tr><td>A W S E D F…</td><td>Notes, while typing (Z, X: octave)</td></tr><tr><td>Enter</td><td>Write held notes at the playhead</td></tr>
-        <tr><td>R</td><td>Step record on / off</td></tr><tr><td>Ctrl + scroll</td><td>Zoom</td></tr><tr><td>Shift + scroll</td><td>Scroll sideways</td></tr>
-        <tr><td>Double-click a lane</td><td>Split a tempo, signature or section block</td></tr><tr><td>Esc</td><td>Put the chord down, clear selection</td></tr>
-      </table>
     </section>
   </aside>
 </div>
+<input id="importJson" type="file" accept=".json,application/json" hidden>
+<div id="toasts"></div>
 <script type="module" src="main.js"></script>
 </body>
 </html>

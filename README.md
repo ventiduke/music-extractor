@@ -85,27 +85,37 @@ steady tempo, where a change has to last two bars and be about 5% to count.
 The MIDI and the "steady" previews keep each section's tempo and iron out the
 wobble inside it. `sketch edit FILE tempo 120 --bars 1-15` overrides a section.
 
-## Song project and editor
+## Song Workbench: the editor
 
-`uv run sketch project out/idea.sketch.json --title "Idea" --publish` turns a
-sketch into a song project and bundles it with the editor: tempo, time
-signature and sections as blocks over the bars; tracks of notes placed in
-those bars; the chords the recording used; and the scales its notes fit.
+`web/editor/`, live at <https://ventiduke.github.io/music-extractor/web/editor/>. Record an idea,
+tap the beat, and build a song from it, all in the browser. Nothing is uploaded.
 
-**Song Workbench** (`web/editor/`, live at
-<https://ventiduke.github.io/music-extractor/web/editor/>) is where a song gets
-built from those pieces:
+- **From a recording to a song.** Song menu -> *New song from a recording*: record or choose audio, the notes are found on your device, you tap the beat, and the editor builds bars, tempo and signature blocks, a chord lane, the chords and scales you used, and starter bass, pad and drum parts.
+- **Arrange.** Section, chord, tempo and signature lanes made of blocks: drag an edge to move a boundary, double-click to split, select to edit. Drag across a track to select bars, then copy, paste, repeat, clear or delete.
+- **Notes.** A piano roll: draw, drag to move or re-pitch, drag an edge to resize, snap to 1, 1/2, 1/3, 1/4, 1/6 or 1/8 of a beat, and a loudness lane underneath.
+- **Sound.** 23 sampled instruments and 5 drum kits, with volume, pan, reverb, mute and solo per track. Export audio (WAV) or MIDI.
+- **Tools.** Write a bass line, pad, arpeggio, strummed part or drum part that follows the chord lane; snap, loosen, join, transpose or harmonize what is selected.
+- **Chords, scales, patterns, keys.** Draw with chords from your recording or from the scale; save riffs as patterns to stamp elsewhere; play notes from the computer keyboard (press Q).
+- **Assistant.** Describe a change in words. With your own Claude API key it is applied for you; without one, copy the request into any Claude chat and paste the reply back.
 
-- section, tempo and signature lanes made of blocks: drag an edge to move a boundary, double-click to split, select to edit
-- tracks with mute, solo, volume and sound; drag across a lane to select bars, then copy, paste, repeat, clear or delete
-- a piano roll: draw notes, drag to move or re-pitch, drag an edge to resize, with snapping to 1, 1/2, 1/3, 1/4, 1/6 or 1/8 of a beat
-- chords from the recording to draw with, rename, or change; scales to shade and stay inside
-- notes from the computer keyboard (A W S E D F ...), with step entry
-- loop, metronome, undo/redo, MIDI export
+It is a static site with no build step. Songs and edits are kept in your browser; use *Save a song file* to keep or share one.
 
-It is a static site with no build step. Edits are kept in your browser; use
-"Export song" to save a file. Run it locally with `python3 -m http.server` in
-`web/editor`, and test the model with `node --test web/editor/tests/model.test.mjs`.
+```
+cd web/editor && python3 -m http.server      # run it locally
+for t in model tools ops analysis; do node --test web/editor/tests/$t.test.mjs; done
+uv run python tools/render_sounds.py          # re-render the instrument samples (needs fluidsynth + FluidR3_GM)
+tools/build_vendor.sh                         # rebuild the bundled Claude SDK and Basic Pitch
+```
+
+### Working on a song with Claude outside the editor
+
+`.claude/skills/song-workbench/` is a Claude skill: give Claude a saved song file and it can read it,
+write edit operations, and hand back an edited file to open in the editor. It runs the editor's own
+code (`node .claude/skills/song-workbench/scripts/song.mjs describe SONG.json`). Claude Code picks
+the skill up automatically in this repo; elsewhere, upload the folder as a skill.
+
+The Python pipeline can still bundle a song with the editor:
+`uv run sketch project out/idea.sketch.json --title "Idea" --publish`.
 
 ## Recording the data (Phase 0)
 

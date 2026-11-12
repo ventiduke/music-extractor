@@ -10,6 +10,8 @@ Run everything through `uv run` (plain pip pulls in a TensorFlow that will not i
 - `web/editor/` Song Workbench, the song editor: a static web app (plain ES modules, no build step) served by GitHub Pages.
 - `web/beat_tapper.html` the tapping page (still a private Claude artifact, because it saves taps to that artifact's database).
 - `index.html`, `.nojekyll` the GitHub Pages landing page (Pages serves the repo root of `main`).
+- `tools/` build scripts: `render_sounds.py` (instrument samples), `build_vendor.sh` (bundled libraries), `sync_skill.mjs` (copy song code into the skill).
+- `.claude/skills/song-workbench/` a Claude skill for working on exported song files (see below).
 - `eval/` scoring against `data/clips/labels.csv`; `eval/synth.py` makes synthetic test audio.
 - `data/memos/` the user's recordings. `out/` is generated and git-ignored.
 
@@ -77,37 +79,65 @@ Claude cannot hear audio. After a change that affects how something sounds, send
 
 ## The goal, and the song editor
 
-The user's process: record guitar or humming -> tap the beat -> the system
-extracts notes, chords, harmony, tempo and signature -> they **construct** a
-song from those pieces in an editor, no longer tied to the recording's timing.
-Extraction only has to be a good head start; the editor is where the work is.
-Later: per-track instruments and levels, then handing a song to an AI to
-embellish from a prompt.
+The user's phrase for it is **Seamless Untethered Creation**: record guitar or
+humming, tap the beat, and build a finished-sounding song in one place, without
+depending on a chat session, Python, or any outside service. Extraction only has
+to be a good head start; the editor is where the work is. They asked for the feel
+of a production music editor: direct manipulation (drag to move, resize, split),
+keyboard shortcuts, real instrument sounds, modular code. Hold new work to that.
 
-- `uv run sketch project out/NAME.sketch.json --title "..." --publish` writes `out/NAME.project.json` and, with `--publish`, bundles it with the editor (`web/editor/projects/` + `index.json`). It reaches the user once merged to `main`.
-- Project format (v2; described at the top of `web/editor/model.js` and in `sketch/project.py`): `bars` (count); `tempo`, `signature`, `sections` as change lists (`{bar, ...}` applies from that 0-based bar until the next entry); `tracks` with notes as `[bar, position in beats, length in beats, pitch, velocity]`; `chords` (`name` is a best guess, `pitches` is what was played); `scales`. A signature is `beats` + `division` (2 or 3), so 2 beats dividing in 3 is 6/8. Positions are musical, so notes follow their bar.
-- The editor is Song Workbench: https://ventiduke.github.io/music-extractor/web/editor/ . This container cannot reach github.io; check a deploy through the repo's Actions runs, and test locally with `python3 -m http.server` in `web/editor` plus Playwright.
-- Storage: bundled songs are fetched from `projects/`; the user's edits are kept in their browser (`localStorage`), per song, and shadow the bundled copy until they press "Revert to original". Nothing is uploaded. To get an edited song back, ask the user to press "Export song" and attach the file.
+Song Workbench lives in `web/editor/` and is served at
+https://ventiduke.github.io/music-extractor/web/editor/ . It is a static site: plain ES
+modules, no build step, everything it needs is in the repo. This container cannot reach
+github.io; check a deploy through the repo's Actions runs, and test locally with
+`python3 -m http.server` in `web/editor` plus Playwright (headless Chromium decodes WAV and MP3, not M4A).
+
+What it does:
+- **Capture** (`capture.js`, `analysis/`): record or choose audio, find the notes in the browser (Basic Pitch on TensorFlow.js, same thresholds as Python and the same notes on a test clip), tap the beat, and build a song. `analysis/pipeline.js` is a line-for-line port of the Python `sketch/` pipeline, checked against Python output in `tests/analysis.test.mjs`. Without taps it estimates the beat from the notes, which is only a rough guess.
+- **Arrange** (`arrange.js`): block lanes for sections, chords, tempo and signature; bar ruler; one lane per track. Blocks drag by their edges and split on double-click. A picked-up chord is laid along the Chords lane by dragging.
+- **Notes** (`roll.js`): piano roll with draw and select tools, drag to move / re-pitch / resize, snapping, drum rows, and a loudness lane.
+- **Sound** (`audio.js`, `sounds/`): 23 sampled instruments and 5 drum kits rendered from FluidR3_GM, a mixer (volume, pan, reverb send, meters), and offline export to WAV. Samples load on demand; a plain synth stands in until they arrive.
+- **Tools** (`tools.js`, `toolbox.js`): generators that follow the chord lane (bass styles, pad, arpeggio, strum, drum styles with fills) and transforms (snap, loosen, join, transpose, harmonize in the scale, double, louder/softer, swell/fade).
+- **Library** (`library.js`, `keys.js`): chords found in the recording, chords that belong to the chosen scale, any scale by tonic and type, reusable patterns, on-screen keys and note entry from the computer keyboard.
+- **Assistant** (`assistant.js`, `ops.js`): the user describes a change; a model replies with edit operations; they are applied as one undo step. Works with the user's own Claude API key (official SDK, bundled) or by copying the request into any Claude chat and pasting the reply.
+
+### Song file (project format v2)
+
+Described at the top of `web/editor/model.js`: `bars` (count); `tempo`, `signature`, `sections` as change lists (`{bar, ...}` applies from that 0-based bar until the next entry); `tracks` with `instrument`, `volume`, `pan`, `reverb` and notes as `[bar, position in beats, length in beats, pitch, velocity]`; `chords` (the palette; `name` is a best guess, `pitches` is what was played); `progression` (the chord lane: `{bar, pos, len, name, pitches}`); `patterns`; `scales`. A signature is `beats` + `division` (2 or 3), so 2 beats dividing in 3 is 6/8. Positions are musical, so notes follow their bar.
+
+- `uv run sketch project out/NAME.sketch.json --title "..." --publish` still builds a song from the Python pipeline and bundles it with the editor (`web/editor/projects/` + `index.json`).
+- Storage: bundled songs are fetched from `projects/`; the user's songs and edits are kept in their browser (`localStorage`). Nothing is uploaded. To get a song back, ask the user for **song menu -> Save a song file**.
+
+### Edit operations and the skill
+
+`web/editor/ops.js` defines a small JSON edit language (bars and beats 1-based): `set_tempo`, `set_signature`, `set_section`, bar inserts/deletes/repeats, track ops, `add_notes`, `clear`, `set_chords`, `detect_chords`, `add_chord`, `generate`, `transform`. `GUIDE` in that file is the reference text given to models; `describe()` turns a song into compact text; `applyOps()` validates and applies. The same code backs three routes: the in-app assistant, a pasted chat reply, and the skill.
+
+**When the user gives you a song file to change, use the skill**: `.claude/skills/song-workbench/SKILL.md`. Its script (`scripts/song.mjs describe | guide | apply | check | midi`) runs the editor's own code, copied into `lib/` by `node tools/sync_skill.mjs` (a test fails if the copy is stale). Do not hand-edit song JSON.
 
 ### Editor code map (`web/editor/`)
 
 | File | What it holds |
 | --- | --- |
-| `model.js` | The song model: pure functions (layout, blocks, bars, copy/paste, chord names). No DOM. Tested by `tests/model.test.mjs`. |
+| `model.js` | The song model: pure functions (layout, blocks, bars, copy/paste, chord names, scales). No DOM. |
+| `tools.js` | Pure creation tools: chord-lane detection and editing, generators, transforms, chords of a scale |
+| `ops.js` | The edit-operation language, song description for models, reply parsing |
 | `midi.js` | MIDI export with tempo and signature changes |
+| `analysis/` | Recording -> song: grid from taps, rhythm clean-up, tempo sections, chords, scales, starter parts (port of `sketch/`) |
 | `app.js` | Shared state, selection, undo/redo (`begin()` ... `commit()`, or `edit(fn)`), change events |
-| `audio.js` | Built-in synth and the transport (play, loop, click, mute/solo at play time) |
-| `arrange.js` | Arrangement canvas: section / tempo / signature block lanes, bar ruler, track lanes |
-| `roll.js` | Piano roll canvas: draw, select, drag to move / re-pitch / resize, drum rows |
-| `panels.js` | HTML parts: track headers, context bar, chords, scales, keys, copy/paste/duplicate |
-| `main.js` | Toolbar, shortcuts, scroll and zoom, loading and saving |
-| `store.js` | Bundled songs, browser storage, file export |
+| `audio.js` | Sample library loading, the mixer graph, transport, auditioning, WAV rendering |
+| `arrange.js`, `roll.js` | The two canvases |
+| `tracks.js`, `context.js`, `library.js`, `keys.js`, `toolbox.js`, `assistant.js`, `capture.js` | HTML panels and dialogs |
+| `actions.js` | Copy, paste, duplicate, delete, save chord/pattern, track add/remove (shared by menus and shortcuts) |
+| `ui.js` | Elements, icons, menus, dialogs, toasts |
+| `main.js`, `store.js` | Wiring, shortcuts, song menu; bundled songs and browser storage |
+| `vendor/` | Bundled Claude SDK and Basic Pitch (rebuild with `tools/build_vendor.sh`) |
 
-Every change to the song goes through `begin()`/`commit()` so it is undoable. Views redraw on `emit()`; `touch()` redraws during a drag without closing the undo step.
-The user asked for the feel of a production music editor: direct manipulation (drag to move, resize, split), keyboard shortcuts, modular code. Keep to that.
+Every change to the song goes through `begin()`/`commit()` so it is undoable. Views redraw on `emit()`; `touch()` redraws during a drag without closing the undo step. Keep `model.js`, `tools.js`, `ops.js` and `analysis/` free of DOM and audio so they stay testable in node and usable by the skill.
 
-- Not built yet: importing audio in the browser (extraction still runs in Python), reusable clips/patterns, drum pattern tools beyond the grid, audio export, the AI hand-off.
-- The earlier one-file editor and its Claude artifact (`Rip1rNkeNyithTmCWRwxUo`) are retired.
+Claude API notes for `assistant.js`: default model `claude-opus-5-5`, called through the bundled official SDK with `dangerouslyAllowBrowser` (the key is the user's own and stays in their browser); streaming with `finalMessage()`; `output_config.effort` set explicitly; server-side `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`) on Opus and Sonnet so a declined request is retried on a fallback model; the system prompt is cached. Re-read the `claude-api` skill before changing any of that.
+
+- Not built yet: keeping the original recording as a reference track, audio tracks, automation, per-track effects beyond reverb, mobile layout.
+- The earlier one-file editor and its Claude artifact (`Rip1rNkeNyithTmCWRwxUo`) are retired. The Beat Tapper artifact still works but tapping is now built into the editor's capture flow.
 
 ## Tapped beats
 
@@ -138,4 +168,4 @@ the authority.
 
 ## Checks
 
-`uv run pytest` before committing (Python; synthetic audio only), and `node --test web/editor/tests/model.test.mjs` after touching the editor's model or MIDI export.
+`uv run pytest` before committing (Python; synthetic audio only). After touching the editor: `for t in model tools ops analysis; do node --test web/editor/tests/$t.test.mjs; done`, and drive the page in headless Chromium for anything visual or interactive (no errors in the console is the minimum).
