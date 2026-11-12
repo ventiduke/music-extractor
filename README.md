@@ -87,13 +87,25 @@ wobble inside it. `sketch edit FILE tempo 120 --bars 1-15` overrides a section.
 
 ## Song project and editor
 
-`uv run sketch project out/idea.sketch.json` turns a sketch into a song
-project: bars with their own tempo and signature, grouped into sections;
-tracks of notes placed in those bars; the chords the recording used; and the
-scales its notes fit. Song Workbench (`web/song_editor.html`, a private Claude
-artifact) opens that project for building on: change bars and sections, edit
-notes on a grid, stamp chords, shade and snap to a scale, build chords on a
-keyboard, and set each track's sound and level.
+`uv run sketch project out/idea.sketch.json --title "Idea" --publish` turns a
+sketch into a song project and bundles it with the editor: tempo, time
+signature and sections as blocks over the bars; tracks of notes placed in
+those bars; the chords the recording used; and the scales its notes fit.
+
+**Song Workbench** (`web/editor/`, live at
+<https://ventiduke.github.io/music-extractor/web/editor/>) is where a song gets
+built from those pieces:
+
+- section, tempo and signature lanes made of blocks: drag an edge to move a boundary, double-click to split, select to edit
+- tracks with mute, solo, volume and sound; drag across a lane to select bars, then copy, paste, repeat, clear or delete
+- a piano roll: draw notes, drag to move or re-pitch, drag an edge to resize, with snapping to 1, 1/2, 1/3, 1/4, 1/6 or 1/8 of a beat
+- chords from the recording to draw with, rename, or change; scales to shade and stay inside
+- notes from the computer keyboard (A W S E D F ...), with step entry
+- loop, metronome, undo/redo, MIDI export
+
+It is a static site with no build step. Edits are kept in your browser; use
+"Export song" to save a file. Run it locally with `python3 -m http.server` in
+`web/editor`, and test the model with `node --test web/editor/tests/model.test.mjs`.
 
 ## Recording the data (Phase 0)
 
