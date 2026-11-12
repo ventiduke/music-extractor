@@ -48,6 +48,11 @@ def write_preview(original: np.ndarray, notes: list[NoteEvent], path: Path, mode
         audio = 0.5 * (original + rendered)
     else:
         audio = np.stack([original, rendered], axis=1)
+    return write_audio(audio, path)
+
+
+def write_audio(audio: np.ndarray, path: str | Path) -> Path:
+    """Write mono (n,) or stereo (n, 2) float audio at SR; .wav/.flac as is, anything else through ffmpeg."""
     path = Path(path)
     if path.suffix.lower() in (".wav", ".flac"):
         sf.write(path, audio, SR)

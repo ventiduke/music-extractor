@@ -11,10 +11,11 @@ warnings.simplefilter("ignore")
 
 from eval.synth import SR, render  # noqa: E402
 from extract.types import NoteEvent, parse_notes  # noqa: E402
-from sketch import build as sk  # noqa: E402
 from sketch import cli  # noqa: E402
 from sketch.grid import Grid  # noqa: E402
 from sketch.harmony import estimate_key, harmony_spans  # noqa: E402
+from sketch.parts import make_parts  # noqa: E402
+from sketch.rhythm import clean, expand, runs, time_signature  # noqa: E402
 from sketch.tidy import SketchNote, clean_overlaps, tidy  # noqa: E402
 
 STEADY = Grid(beat_times=[0.5 * i for i in range(17)], meter=4, tempo_bpm=120.0, downbeat_confidence=1.0)
@@ -60,17 +61,66 @@ def test_overlaps_are_cleaned():
     assert [(n.beat, n.length, n.velocity) for n in notes] == [(0.0, 2.0, 0.9), (2.0, 1.0, 0.7)]
 
 
-def test_build_edit_render_round_trip(tmp_path, capsys):
-    # Four bars at 120 bpm: a chord on every beat, changing each bar.
+def _strums(times, pitch=45, length=0.2):
+    return [NoteEvent(pitch, t, t + length, 0.8, 0.9) for t in times]
+
+
+def test_rhythm_keeps_a_late_strum_on_the_eighth():
+    # Beats are 0.5 s apart. Strums a little late or early are still eighths.
+    notes, feels = clean(_strums([0.02, 0.27, 0.56, 0.71, 1.0]), STEADY)
+    assert [n.beat for n in notes] == [0.0, 0.5, 1.0, 1.5, 2.0]
+    assert set(feels) == {"eighths"}
+
+
+def test_rhythm_finds_sixteenths_and_triplets():
+    sixteenths = [0.0, 0.125, 0.25, 0.375]  # beat 0: four strums a sixteenth apart
+    triplets = [1.0, 1.0 + 0.5 / 3, 1.0 + 1.0 / 3]  # beat 2: three even strums
+    notes, feels = clean(_strums(sixteenths + [0.5, 0.75] + triplets, length=0.08), STEADY)
+    assert feels[0] == "sixteenths" and feels[1] == "eighths" and feels[2] == "triplets"
+    assert [n.beat for n in notes] == [0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 0.3333 + 2, 0.6667 + 2]
+    assert time_signature(4, feels) == "4/4" and time_signature(4, ["triplets"] * 8) == "12/8"
+    assert expand(runs(feels), len(feels)) == feels
+
+
+def test_rhythm_closes_small_gaps_and_cleans_lengths():
+    raw = [NoteEvent(45, 0.0, 0.42, 0.8, 0.9), NoteEvent(47, 0.5, 1.3, 0.8, 0.9)]
+    notes, _ = clean(raw, STEADY)
+    assert (notes[0].beat, notes[0].length) == (0.0, 1.0)  # ended just short of the next strum: now joined
+    assert (notes[1].beat, notes[1].length) == (1.0, 1.5)
+
+
+def test_generated_parts_follow_the_guitar():
+    guitar = [SketchNote(p, 0.0, 4.0, 0.8) for p in parse_notes("A2 E3 A3 C#4")]
+    guitar += [SketchNote(p, 4.0, 4.0, 0.8) for p in parse_notes("D3 A3 D4 F#4")]
+    parts = make_parts(guitar, 8, 4, ["eighths"] * 4 + ["triplets"] * 4)
+    assert [(n.pitch % 12, n.beat, n.length) for n in parts["bass"]] == [(9, 0, 2), (9, 2, 2), (2, 4, 2), (2, 6, 2)]
+    assert all(28 <= n.pitch < 40 for n in parts["bass"])
+    assert sorted({(n.pitch % 12, n.beat, n.length) for n in parts["pad"]}) == [
+        (1, 0, 4), (2, 4, 4), (4, 0, 4), (6, 4, 4), (9, 0, 4), (9, 4, 4),
+    ]
+    kicks = [n.beat for n in parts["drums"] if n.pitch == 36]
+    snares = [n.beat for n in parts["drums"] if n.pitch == 38]
+    assert kicks == [0, 2, 4, 6] and snares == [1, 3, 5, 7]
+    hats = [n.beat for n in parts["drums"] if n.pitch == 42]
+    assert hats[:4] == [0, 0.5, 1, 1.5] and hats[8:11] == [4, 4.3333, 4.6667]  # hats follow the feel
+
+
+@pytest.fixture(scope="module")
+def built(tmp_path_factory):
+    """A sketch built from four bars at 120 bpm: a chord on every beat, changing each bar."""
+    tmp = tmp_path_factory.mktemp("song")
     chords = ["E2 B2 E3 G#3", "A2 E3 A3 C#4", "D3 A3 D4 F#4", "E2 B2 E3 G#3"]
     events = [(0.5 + 0.5 * (4 * bar + beat), parse_notes(chord)) for bar, chord in enumerate(chords) for beat in range(4)]
-    memo = tmp_path / "memo.wav"
+    memo = tmp / "memo.wav"
     sf.write(memo, render(events, 9.5, seed=3), SR)
+    cli.main(["build", str(memo), "--out", str(tmp)])
+    return tmp / "memo.sketch.json"
 
-    cli.main(["build", str(memo), "--out", str(tmp_path)])
-    path = tmp_path / "memo.sketch.json"
-    sketch = json.loads(path.read_text())
+
+def test_build_writes_sketch_midi_and_previews(built):
+    sketch = json.loads(built.read_text())
     assert sketch["tempo_bpm"] == pytest.approx(120, rel=0.06)
+    assert sketch["meter"] == 4 and sketch["time_signature"] == "4/4"
     on_eighths = [n["beat"] % 0.5 == 0 for n in sketch["notes"]]
     assert sum(on_eighths) >= 0.95 * len(on_eighths)
     first = min(n["beat"] for n in sketch["notes"])
@@ -78,15 +128,88 @@ def test_build_edit_render_round_trip(tmp_path, capsys):
     gaps = np.diff(sketch["beat_times"])
     assert gaps.min() > 0.4 and gaps.max() < 0.6
     assert {s["bass"] for s in sketch["harmony"]} >= {"E2", "A2", "D3"}
-    for name in ("memo.tidy.mid", "memo.tidy.steady.m4a", "memo.tidy.split.m4a"):
-        assert (tmp_path / name).stat().st_size > 0
+    assert set(sketch["parts"]) == {"bass", "pad", "drums"} and all(sketch["parts"].values())
+    assert {r["name"] for r in sketch["parts"]["drums"]} == {"kick", "snare", "hat"}
+    names = ["clean.mid", "clean.steady.m4a", "clean.split.m4a", "arr.mid", "arr.steady.m4a", "arr.memo.m4a",
+             "tidy.mid", "tidy.steady.m4a", "tidy.split.m4a"]
+    for name in names:
+        assert (built.with_name(f"memo.{name}")).stat().st_size > 0
+    import pretty_midi
+    arr = pretty_midi.PrettyMIDI(str(built.with_name("memo.arr.mid")))
+    assert [i.name for i in arr.instruments] == ["Guitar", "Bass", "Pad", "Drums"] and arr.instruments[3].is_drum
 
-    # An edit: transpose everything up a tone, then re-render.
+
+def _edit(path, tmp_path, *args):
+    """Run an edit on a private copy of the sketch and return the result."""
+    copy = tmp_path / "memo.sketch.json"
+    if not copy.exists():
+        copy.write_text(path.read_text())
+    cli.main(["edit", str(copy), *args])
+    return json.loads(copy.read_text())
+
+
+def test_hand_edit_then_render(built, tmp_path):
+    copy = tmp_path / "memo.sketch.json"
+    sketch = json.loads(built.read_text())
     for n in sketch["notes"]:
         n["pitch"] += 2
-    path.write_text(json.dumps(sketch))
-    cli.main(["render", str(path), "--no-previews"])
-    again = json.loads(path.read_text())
-    assert again["notes"][0]["name"] == "F#2"  # names, key and harmony are recomputed from the pitches
-    assert {s["bass"] for s in again["harmony"]} >= {"F#2", "B2", "E3"}
+    copy.write_text(json.dumps(sketch))
+    cli.main(["render", str(copy), "--no-previews"])
+    again = json.loads(copy.read_text())
+    assert {s["bass"] for s in again["harmony"]} >= {"F#2", "B2", "E3"}  # names, key, harmony recomputed
     assert [n["id"] for n in again["notes"]] == list(range(len(again["notes"])))
+    assert (tmp_path / "memo.clean.mid").exists()
+
+
+def test_edit_transpose_velocity_clear_thin(built, tmp_path, capsys):
+    before = json.loads(built.read_text())
+    after = _edit(built, tmp_path, "transpose", "2", "--bars", "2", "--part", "guitar", "bass")
+    moved = {n["name"] for n in after["notes"] if n["bar"] == 2}
+    assert "B2" in moved and "A2" not in moved
+    assert [n["pitch"] for n in after["notes"] if n["bar"] == 1] == [n["pitch"] for n in before["notes"] if n["bar"] == 1]
+    assert [n["pitch"] for n in after["parts"]["pad"]] == [n["pitch"] for n in before["parts"]["pad"]]
+    assert [n["pitch"] for n in after["parts"]["drums"]] == [n["pitch"] for n in before["parts"]["drums"]]
+    assert after["history"][-1] == {"op": "transpose", "semitones": 2, "bars": "2", "parts": ["guitar", "bass"]}
+
+    after = _edit(built, tmp_path, "velocity", "0.5", "--part", "drums")
+    assert max(n["velocity"] for n in after["parts"]["drums"]) <= 0.45
+    after = _edit(built, tmp_path, "thin", "--grid", "2")
+    assert all(n["beat"] % 2 == 0 for n in after["notes"]) and after["notes"]
+    after = _edit(built, tmp_path, "clear", "--bars", "3-4", "--part", "pad")
+    assert not [n for n in after["parts"]["pad"] if n["bar"] >= 3] and [n for n in after["notes"] if n["bar"] >= 3]
+    assert [h["op"] for h in after["history"]] == ["transpose", "velocity", "thin", "clear"]
+
+
+def test_edit_repeat_and_delete_change_the_length(built, tmp_path, capsys):
+    before = json.loads(built.read_text())
+    bars = before["bars"]
+    in_bar2 = [(n["pitch"], n["beat_in_bar"]) for n in before["notes"] if n["bar"] == 2]
+    after = _edit(built, tmp_path, "repeat", "2", "--times", "2")
+    assert after["bars"] == bars + 2 and after["structure_edited"]
+    assert len(after["beat_times"]) == len(before["beat_times"]) + 8
+    for bar in (2, 3, 4):
+        assert [(n["pitch"], n["beat_in_bar"]) for n in after["notes"] if n["bar"] == bar] == in_bar2
+    kicks = lambda s, bar: [n["beat_in_bar"] for n in s["parts"]["drums"] if n["bar"] == bar and n["name"] == "kick"]
+    assert kicks(after, 3) == kicks(before, 2)
+    after = _edit(built, tmp_path, "delete", "2-4")
+    assert after["bars"] == bars - 1
+    assert [(n["pitch"], n["beat_in_bar"]) for n in after["notes"] if n["bar"] == 2] == [
+        (n["pitch"], n["beat_in_bar"]) for n in before["notes"] if n["bar"] == 3
+    ]
+    # The memo no longer lines up, so play-along previews are skipped; steady ones are still made.
+    cli.main(["render", str(tmp_path / "memo.sketch.json")])
+    assert (tmp_path / "memo.arr.steady.m4a").exists() and not (tmp_path / "memo.arr.memo.m4a").exists()
+
+
+def test_parts_regenerate_and_tempo_and_show(built, tmp_path, capsys):
+    after = _edit(built, tmp_path, "clear", "--part", "bass", "drums")
+    assert not after["parts"]["bass"] and not after["parts"]["drums"]
+    cli.main(["parts", str(tmp_path / "memo.sketch.json"), "--only", "bass"])
+    after = _edit(built, tmp_path, "tempo", "90")
+    assert after["parts"]["bass"] and not after["parts"]["drums"] and after["tempo_bpm"] == 90
+    capsys.readouterr()
+    cli.main(["show", str(tmp_path / "memo.sketch.json"), "--bars", "1-2"])
+    shown = capsys.readouterr().out.splitlines()
+    assert "90.0 bpm, 4/4" in shown[0] and shown[1].startswith("bar   1 |") and len(shown) == 3
+    with pytest.raises(SystemExit):
+        cli.main(["edit", str(tmp_path / "memo.sketch.json"), "transpose", "1", "--bars", "99"])
