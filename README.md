@@ -79,6 +79,12 @@ whether each tap divides in two or three. Saved as
 `data/beats/NAME.beats.json`, the taps replace the automatic grid the next
 time `sketch build` runs on that memo.
 
+Taps are good to about 50 ms, so each beat is then sharpened by the strums
+around it. From that grid the sketch works out a tempo map: stretches of
+steady tempo, where a change has to last two bars and be about 5% to count.
+The MIDI and the "steady" previews keep each section's tempo and iron out the
+wobble inside it. `sketch edit FILE tempo 120 --bars 1-15` overrides a section.
+
 ## Recording the data (Phase 0)
 
 | Folder | What goes in it |
