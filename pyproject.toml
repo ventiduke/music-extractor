@@ -1,0 +1,38 @@
+[project]
+name = "music-extractor"
+version = "0.1.0"
+description = "Turn a solo guitar voice memo into notes: MIDI plus a JSON sidecar with labeled overtone layers."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "basic-pitch[onnx]==0.4.0",
+    "librosa>=0.10",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pretty_midi>=0.2.10",
+    "mir_eval>=0.7",
+    "soundfile>=0.12",
+    "setuptools<81",  # pretty_midi and resampy still import pkg_resources
+]
+
+[project.scripts]
+extract = "extract.cli:main"
+score = "eval.score:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["extract", "eval"]
+
+[tool.uv]
+# basic-pitch pins TensorFlow <2.15.1, which is huge and has no wheels for
+# Python 3.12. We run its bundled ONNX model instead, so drop TensorFlow.
+override-dependencies = ["tensorflow ; sys_platform == 'never'"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
