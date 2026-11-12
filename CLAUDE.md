@@ -6,7 +6,8 @@ Run everything through `uv run` (plain pip pulls in a TensorFlow that will not i
 ## Layout
 
 - `extract/` audio -> raw notes. `extract notes memo.m4a` writes `out/memo.mid` + `out/memo.json`.
-- `sketch/` raw notes -> song sketch (beat grid, tidied notes, key, harmony). This is where editing happens.
+- `sketch/` raw notes -> song sketch (beat grid, tidied notes, key, harmony), then -> song project for the editor.
+- `web/` the two pages the user works in: `beat_tapper.html` and `song_editor.html` (published as private Claude artifacts).
 - `eval/` scoring against `data/clips/labels.csv`; `eval/synth.py` makes synthetic test audio.
 - `data/memos/` the user's recordings. `out/` is generated and git-ignored.
 
@@ -71,6 +72,23 @@ a light tidy, kept for comparison; do not edit). Each note is one line:
 | `NAME.tidy.*` | Written by `build` only: the light-touch version, for comparison |
 
 Claude cannot hear audio. After a change that affects how something sounds, send the user the preview and ask.
+
+## The goal, and the song editor
+
+The user's process: record guitar or humming -> tap the beat -> the system
+extracts notes, chords, harmony, tempo and signature -> they **construct** a
+song from those pieces in an editor, no longer tied to the recording's timing.
+Extraction only has to be a good head start; the editor is where the work is.
+Later: per-track instruments and levels, then handing a song to an AI to
+embellish from a prompt.
+
+- `uv run sketch project out/NAME.sketch.json` writes `out/NAME.project.json` (`sketch/project.py`): bars each with `beats`, `division` (2 or 3) and `bpm`; `sections` (name + first bar); `tracks` with notes as `[bar, position in beats, length in beats, pitch, velocity]`; `chords` (name is a best guess, `pitches` is what was played); `scales` (with `fit` and the bars they cover).
+  All 0-based. Positions are musical, so notes follow their bar when its tempo or signature changes.
+- The editor is Song Workbench: https://claude.ai/artifact/Rip1rNkeNyithTmCWRwxUo (source `web/song_editor.html`).
+  It loads and saves projects in that artifact's database, collection `projects`, document id = project `id`.
+  Send a song over with the `ArtifactData` tool (`set`, `file_path` = the project JSON); read the user's edited version back the same way (pass `if_version` when overwriting).
+- The editor has: section and bar tools (tempo, beats, division, insert/repeat/copy/paste/clear/delete), a note grid per track, a chord palette to stamp from, scales to shade and snap to, a keyboard to build chords, and per-track sound, volume and mute. It has its own synth; it does not play the recording.
+- Not built yet: drum pattern tools beyond the note grid, MIDI/audio export from the editor, bringing an edited project back into Python, the AI hand-off.
 
 ## Tapped beats
 

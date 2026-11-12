@@ -40,6 +40,9 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("sketch", type=Path)
     s.add_argument("--bars", help="e.g. 5-8")
 
+    x = sub.add_parser("project", help="sketch -> song project for the editor (bars, tracks, chords, scales)")
+    x.add_argument("sketch", nargs="+", type=Path)
+
     p = sub.add_parser("parts", help="regenerate bass / pad / drums from the guitar notes")
     p.add_argument("sketch", type=Path)
     p.add_argument("--only", nargs="+", choices=("bass", "pad", "drums"), default=["bass", "pad", "drums"])
@@ -91,6 +94,18 @@ def main(argv: list[str] | None = None) -> None:
             sk.write(sk.refresh(sk.read(path)), path)
             for made in sk.render(path, previews=not args.no_previews):
                 print(f"  {made}")
+    elif args.command == "project":
+        from . import project as pj
+
+        for path in args.sketch:
+            project = pj.from_sketch(sk.refresh(sk.read(path)))
+            out = pj.write(project, path.with_name(path.name.removesuffix(".sketch.json") + ".project.json"))
+            print(f"{out}: {len(project['bars'])} bars, {len(project['sections'])} sections, {len(project['tracks'])} tracks")
+            print("  chords: " + ", ".join(f"{c['name']} ({c['beats']} beats)" for c in project["chords"][:10]))
+            print("  scales: " + ", ".join(
+                f"{s['name']} {s['fit']:.0%}" + ("" if s["bars"] == [1, len(project["bars"])] else f" in bars {s['bars'][0]}-{s['bars'][1]}")
+                for s in project["scales"]
+            ))
     elif args.command == "show":
         print(edit.overview(sk.refresh(sk.read(args.sketch)), args.bars))
     elif args.command == "parts":

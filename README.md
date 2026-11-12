@@ -85,6 +85,16 @@ steady tempo, where a change has to last two bars and be about 5% to count.
 The MIDI and the "steady" previews keep each section's tempo and iron out the
 wobble inside it. `sketch edit FILE tempo 120 --bars 1-15` overrides a section.
 
+## Song project and editor
+
+`uv run sketch project out/idea.sketch.json` turns a sketch into a song
+project: bars with their own tempo and signature, grouped into sections;
+tracks of notes placed in those bars; the chords the recording used; and the
+scales its notes fit. Song Workbench (`web/song_editor.html`, a private Claude
+artifact) opens that project for building on: change bars and sections, edit
+notes on a grid, stamp chords, shade and snap to a scale, build chords on a
+keyboard, and set each track's sound and level.
+
 ## Recording the data (Phase 0)
 
 | Folder | What goes in it |
