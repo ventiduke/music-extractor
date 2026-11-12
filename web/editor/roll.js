@@ -1,13 +1,14 @@
 // The piano roll for the chosen track: draw, select, drag to move or re-pitch, drag an edge to resize.
 import { app, begin, commit, emit, scalePcs, touch, track } from "./app.js";
 import { hear, transport } from "./audio.js";
-import { css, trackColor } from "./arrange.js";
+import { css, stampAt, trackColor } from "./arrange.js";
 import { DRUM_ROWS, absOf, barAt, intoScale, noteName, place, round, snapDown, snapTo } from "./model.js";
 
 export const TOP = 96, BOTTOM = 24; // highest and lowest pitch shown (C7 .. C1)
-let canvas, keys, g, kg, drag = null;
+let canvas, keys, vel, g, kg, vg, drag = null;
+export const VEL_H = 62;
 const isDrums = () => track().kind === "drums";
-export const rowH = () => (isDrums() ? 30 : 14);
+export const rowH = () => (isDrums() ? 24 : 14);
 export const rows = () => (isDrums() ? DRUM_ROWS.map((d) => d[0]) : Array.from({ length: TOP - BOTTOM + 1 }, (_, i) => TOP - i));
 export const height = () => rows().length * rowH();
 const X = (beat) => beat * app.view.ppb - app.view.scrollX;
@@ -18,7 +19,7 @@ export function draw() {
   const L = app.L, t = track(), R = rows(), rh = rowH(), w = canvas.clientWidth, h = height(), dpr = window.devicePixelRatio || 1;
   for (const [c, cw] of [[canvas, w], [keys, keys.clientWidth]]) if (c.width !== Math.round(cw * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(cw * dpr); c.height = Math.round(h * dpr); c.style.height = h + "px"; }
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
-  const C = { line: css("--line"), fg: css("--fg"), muted: css("--muted"), soft: css("--soft"), panel: css("--panel"), sel: css("--sel"), selSoft: css("--sel-soft") };
+  const C = { line: css("--line"), fg: css("--fg"), muted: css("--muted"), soft: css("--soft"), panel: css("--panel"), sel: css("--accent"), selSoft: css("--accent-soft") };
   const pcs = scalePcs(), drums = isDrums(), black = (p) => [1, 3, 6, 8, 10].includes(p % 12);
   R.forEach((p, i) => { g.fillStyle = drums ? (i % 2 ? C.soft : C.panel) : pcs ? (pcs.has(p % 12) ? css("--scale") : css("--offscale")) : black(p) ? C.soft : C.panel; g.fillRect(0, i * rh, w, rh);
     if (!drums && p % 12 === 0) { g.strokeStyle = C.line; g.beginPath(); g.moveTo(0, (i + 1) * rh + 0.5); g.lineTo(w, (i + 1) * rh + 0.5); g.stroke(); } });
@@ -38,24 +39,41 @@ export function draw() {
     if (n[0] < first - 8 || n[0] > last) return; const ri = rowOf(n[3]); if (ri < 0) return;
     const x = X(absOf(n, L)), wd = Math.max(4, n[2] * app.view.ppb - 1), on = app.sel.notes.has(i);
     g.fillStyle = on ? selColor : color; g.globalAlpha = on ? 1 : 0.5 + 0.5 * n[4]; g.fillRect(x, ri * rh + 1, wd, rh - 2); g.globalAlpha = 1;
-    g.strokeStyle = on ? C.fg : C.panel; g.strokeRect(x + 0.5, ri * rh + 1.5, wd - 1, rh - 3);
-    if (!drums && wd > 26 && rh >= 13) { g.fillStyle = C.panel; g.font = "9px " + css("--mono"); g.textBaseline = "middle"; g.fillText(noteName(n[3]), x + 3, ri * rh + rh / 2 + 0.5); }
+    g.strokeStyle = on ? C.fg : css("--note-edge"); g.strokeRect(x + 0.5, ri * rh + 1.5, wd - 1, rh - 3);
+    if (!drums && wd > 26 && rh >= 13) { g.fillStyle = css("--on-color"); g.font = "9px " + css("--mono"); g.textBaseline = "middle"; g.fillText(noteName(n[3]), x + 3, ri * rh + rh / 2 + 0.5); }
   });
   if (drag && drag.kind === "marquee") { g.strokeStyle = C.sel; g.fillStyle = C.selSoft; g.globalAlpha = 0.4; g.fillRect(drag.x0, drag.y0, drag.x1 - drag.x0, drag.y1 - drag.y0); g.globalAlpha = 1; g.strokeRect(drag.x0 + 0.5, drag.y0 + 0.5, drag.x1 - drag.x0, drag.y1 - drag.y0); }
-  const ph = X(transport.beat()); g.fillStyle = css("--head"); g.fillRect(ph - 1, 0, 2, h);
+  const ph = X(transport.beat()); g.fillStyle = css("--hot"); g.fillRect(ph - 0.75, 0, 1.5, h);
+  drawVelocity(first, last, color, selColor, C);
   // the keys column
   const kw = keys.clientWidth; kg.setTransform(dpr, 0, 0, dpr, 0, 0); kg.clearRect(0, 0, kw, h); kg.textBaseline = "middle";
   const heldSet = new Set(app.held);
   R.forEach((p, i) => {
     const yy = i * rh;
-    if (drums) { kg.fillStyle = i % 2 ? C.soft : C.panel; kg.fillRect(0, yy, kw, rh); kg.fillStyle = C.fg; kg.font = "12px " + css("--body"); kg.fillText(DRUM_ROWS[i][1], 12, yy + rh / 2); }
+    if (drums) { kg.fillStyle = i % 2 ? C.soft : C.panel; kg.fillRect(0, yy, kw, rh); kg.fillStyle = C.fg; kg.font = "11.5px " + css("--body"); kg.fillText(DRUM_ROWS[i][1], 12, yy + rh / 2 + 0.5); }
     else {
-      kg.fillStyle = heldSet.has(p) ? selColor : black(p) ? C.fg : C.panel; kg.fillRect(0, yy, black(p) ? kw * 0.62 : kw, rh);
-      if (!black(p)) { kg.strokeStyle = C.line; kg.strokeRect(0.5, yy + 0.5, kw - 1, rh); }
+      kg.fillStyle = "#eef0ee"; kg.fillRect(0, yy, kw, rh); // piano keys keep piano colours in both themes
+      if (black(p)) { kg.fillStyle = heldSet.has(p) ? selColor : "#1b1e21"; kg.fillRect(0, yy + 1, kw * 0.62, rh - 2); } else if (heldSet.has(p)) { kg.fillStyle = selColor; kg.fillRect(0, yy, kw, rh); }
+      if (!black(p) && [0, 5].includes(p % 12)) { kg.strokeStyle = "#b9beb9"; kg.beginPath(); kg.moveTo(0, yy + rh + 0.5); kg.lineTo(kw, yy + rh + 0.5); kg.stroke(); }
       if (pcs && pcs.has(p % 12)) { kg.fillStyle = C.sel; kg.fillRect(kw - 5, yy + 2, 3, rh - 4); }
-      if (p % 12 === 0 || heldSet.has(p)) { kg.fillStyle = black(p) || heldSet.has(p) ? C.panel : C.muted; kg.font = "10px " + css("--mono"); kg.fillText(noteName(p), kw - 34, yy + rh / 2 + 0.5); }
+      if (p % 12 === 0 || heldSet.has(p)) { kg.fillStyle = "#3a403c"; kg.font = "10px " + css("--mono"); kg.fillText(noteName(p), kw - 34, yy + rh / 2 + 0.5); }
     }
   });
+}
+
+function drawVelocity(first, last, color, selColor, C) { // one stem per note: its height is how hard the note is played
+  const L = app.L, t = track(), w = vel.clientWidth, dpr = window.devicePixelRatio || 1;
+  if (vel.width !== Math.round(w * dpr) || vel.height !== Math.round(VEL_H * dpr)) { vel.width = Math.round(w * dpr); vel.height = Math.round(VEL_H * dpr); }
+  vg.setTransform(dpr, 0, 0, dpr, 0, 0); vg.clearRect(0, 0, w, VEL_H); vg.fillStyle = css("--lane"); vg.fillRect(0, 0, w, VEL_H);
+  vg.strokeStyle = C.line; for (const f of [0.25, 0.5, 0.75]) { vg.beginPath(); vg.moveTo(0, Math.round(VEL_H * f) + 0.5); vg.lineTo(w, Math.round(VEL_H * f) + 0.5); vg.stroke(); }
+  t.notes.forEach((n, i) => { if (n[0] < first || n[0] > last) return; const x = X(absOf(n, L)), hgt = Math.max(2, n[4] * (VEL_H - 6)), on = app.sel.notes.has(i);
+    vg.fillStyle = on ? selColor : color; vg.globalAlpha = on ? 1 : 0.75; vg.fillRect(x, VEL_H - hgt, 3, hgt); vg.fillRect(x - 1, VEL_H - hgt - 1, 5, 3); vg.globalAlpha = 1; });
+  const ph = X(transport.beat()); vg.fillStyle = css("--hot"); vg.fillRect(ph - 0.75, 0, 1.5, VEL_H);
+}
+function paintVelocity(e) { // drag across the lane to set loudness; with notes selected, only those change
+  const r = vel.getBoundingClientRect(), x = e.clientX - r.left, v = round(Math.max(0.05, Math.min(1, 1 - (e.clientY - r.top - 3) / (VEL_H - 6)))), L = app.L, t = track(), only = app.sel.notes.size > 0; let changed = false;
+  t.notes.forEach((n, i) => { if (only && !app.sel.notes.has(i)) return; const nx = X(absOf(n, L)); if (Math.abs(nx + 1.5 - x) <= 5 && n[4] !== v) { n[4] = v; changed = true; } });
+  if (changed) touch();
 }
 
 function hit(x, y) { // the note under a point, and which part of it
@@ -69,8 +87,12 @@ function hit(x, y) { // the note under a point, and which part of it
 }
 function newPitch(pitch) { return isDrums() || !app.scaleLock ? pitch : intoScale(pitch, scalePcs()); }
 
-export function mount(el, keysEl, scroller) {
-  canvas = el; keys = keysEl; g = canvas.getContext("2d"); kg = keys.getContext("2d");
+export function mount(el, keysEl, scroller, velEl) {
+  canvas = el; keys = keysEl; vel = velEl; g = canvas.getContext("2d"); kg = keys.getContext("2d"); vg = vel.getContext("2d");
+  let painting = false;
+  vel.addEventListener("pointerdown", (e) => { vel.setPointerCapture(e.pointerId); painting = true; begin(); paintVelocity(e); });
+  vel.addEventListener("pointermove", (e) => { if (painting) paintVelocity(e); });
+  const stopPaint = () => { if (painting) { painting = false; commit(); } }; vel.addEventListener("pointerup", stopPaint); vel.addEventListener("pointercancel", stopPaint);
   const pos = (e) => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
   canvas.addEventListener("contextmenu", (e) => { e.preventDefault(); const [x, y] = pos(e), h2 = hit(x, y); if (h2) { begin(); track().notes.splice(h2.index, 1); app.sel.notes = new Set(); commit(); } });
   canvas.addEventListener("pointerdown", (e) => {
@@ -86,6 +108,7 @@ export function mount(el, keysEl, scroller) {
       emit("selection"); return;
     }
     if (app.view.tool === "select") { if (!e.shiftKey) app.sel.notes = new Set(); drag = { kind: "marquee", x0: x, y0: y, x1: x, y1: y, keep: new Set(app.sel.notes) }; emit("selection"); return; }
+    if (app.stamp && (app.stamp.kind === "drums") === isDrums()) { stampAt(t, snapDown(beat, snap)); return; } // a picked-up pattern lands where you click
     // draw: a note, a drum hit, or the picked-up chord
     const start = snapDown(beat, snap), pitches = app.brush && !isDrums() ? app.brush : [newPitch(R[ri])];
     begin(); const [bar, p0] = place(start, L), len = isDrums() ? Math.min(snap, 0.25) : app.view.noteLen, first = t.notes.length;
@@ -133,7 +156,8 @@ export function mount(el, keysEl, scroller) {
   };
   canvas.addEventListener("pointerup", end); canvas.addEventListener("pointercancel", end);
   canvas.addEventListener("dblclick", (e) => { const [x, y] = pos(e), h2 = hit(x, y); if (h2 && app.view.tool === "select") { begin(); track().notes.splice(h2.index, 1); app.sel.notes = new Set(); commit(); } });
-  keys.addEventListener("pointerdown", (e) => { const r = keys.getBoundingClientRect(), p = rows()[Math.floor((e.clientY - r.top) / rowH())]; if (p !== undefined) hear(track(), [p], 0.5); });
+  keys.addEventListener("pointerdown", (e) => { const r = keys.getBoundingClientRect(), p = rows()[Math.floor((e.clientY - r.top) / rowH())]; if (p === undefined) return; hear(track(), [p], 0.5);
+    if (!isDrums()) { app.held = app.held.includes(p) ? app.held.filter((x) => x !== p) : [...app.held, p].sort((a, b) => a - b); emit("selection"); } });
   scroller.addEventListener("scroll", () => emit("view"));
 }
 

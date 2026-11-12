@@ -6,7 +6,8 @@ const PPQ = 480;
 const vlq = (n) => { const out = [n & 0x7f]; while ((n >>= 7)) out.unshift((n & 0x7f) | 0x80); return out; };
 const u32 = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
 const text = (s) => [...s].map((c) => c.charCodeAt(0) & 0x7f);
-const PROGRAMS = { pluck: 25, keys: 0, bass: 33, pad: 89, lead: 80, organ: 16 };
+const PROGRAMS = { piano: 0, epiano: 4, organ: 16, vibes: 11, marimba: 12, steel: 25, nylon: 24, clean: 27, drive: 29, harp: 46, bass: 33, upright: 32, synthbass: 38,
+  strings: 48, cello: 42, violin: 40, pad: 89, choir: 52, brass: 61, sax: 65, flute: 73, saw: 81, square: 80 };
 
 function chunk(events) { // events: [tick, bytes]
   events.sort((a, b) => a[0] - b[0]);
