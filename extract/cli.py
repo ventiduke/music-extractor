@@ -24,6 +24,11 @@ def main(argv: list[str] | None = None) -> None:
         help=f"overtone templates (default: {DEFAULT_TEMPLATES} if it exists)",
     )
     notes.add_argument("--no-templates", action="store_true", help="skip the overtone layers")
+    notes.add_argument(
+        "--preview", nargs="?", const="split", choices=("split", "notes", "mix"),
+        help="also write an audio file of the notes: memo left / notes right (split, the default), "
+        "notes alone, or both mixed",
+    )
 
     tmpl = sub.add_parser("templates", help="build overtone templates from single-note recordings")
     tmpl.add_argument("folder", nargs="?", type=Path, default=Path("data/templates"))
@@ -50,6 +55,12 @@ def main(argv: list[str] | None = None) -> None:
         result = analyse(audio, engine=args.engine, templates=templates, tuning=args.tuning)
         mid, sidecar = write(result, args.out, audio.stem)
         print(f"{audio.name}: {len(result.notes)} notes in {len(result.segments)} segments -> {mid}, {sidecar}")
+        if args.preview:
+            from .audio import load
+            from .preview import write_preview
+
+            target = args.out / f"{audio.stem}.preview.m4a"
+            print(f"  preview ({args.preview}) -> {write_preview(load(audio), result.notes, target, args.preview)}")
 
 
 if __name__ == "__main__":

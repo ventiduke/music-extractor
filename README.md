@@ -19,6 +19,7 @@ Use uv rather than plain pip: Basic Pitch pins an old TensorFlow, and
 
 ```
 uv run extract notes data/memos/idea.m4a            # -> out/idea.mid, out/idea.json
+uv run extract notes memo.m4a --preview             # also out/memo.preview.m4a: memo left ear, notes right ear
 uv run extract notes memo.wav --engine dsp          # signal-processing engine instead of the model
 uv run extract notes memo.wav --tuning "D2 A2 D3 G3 B3 E4"
 uv run extract templates                            # build overtone templates from data/templates/
