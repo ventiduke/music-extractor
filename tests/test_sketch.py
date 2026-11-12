@@ -303,3 +303,51 @@ def test_midi_carries_tempo_changes_and_compound_time(built, tmp_path, capsys):
     assert (signature.numerator, signature.denominator) == (12, 8)
     tempo = next(m for m in midi.tracks[0] if m.type == "set_tempo")
     assert round(mido.tempo2bpm(tempo.tempo)) == round(sketch["tempo_map"][0]["bpm"] * 1.5)  # dotted-quarter beat
+
+
+def test_chords_and_scales_are_read_off_the_notes():
+    from sketch.theory import chord_name, chords_used, likely_scales
+
+    assert chord_name(parse_notes("E2 B2 E3 G#3 B3 E4")) == "E"
+    assert chord_name(parse_notes("C#3 E3 G#3 B3")) == "C#m7"
+    assert chord_name(parse_notes("B2 E3 G#3")) == "E/B"
+    assert chord_name(parse_notes("A2 E3")) == "A5"
+    assert chord_name(parse_notes("E2 F3 A#3")) == "E F A#"  # no common chord: just the notes, bass first
+
+    def chord(text, bar):
+        return [SketchNote(p, bar * 4.0, 4.0, 0.8) for p in parse_notes(text)]
+
+    # E, A, B, E in E major, then four bars that sit in G major.
+    song = chord("E2 B2 E3 G#3", 0) + chord("A2 E3 A3 C#4", 1) + chord("B2 F#3 B3 D#4", 2) + chord("E2 B2 E3 G#3", 3)
+    song = song + [SketchNote(n.pitch, n.beat + 16, n.length, n.velocity) for n in song]  # 8 bars in E
+    for bar, text in enumerate(["G2 D3 G3 B3", "C3 G3 C4 E4", "D3 A3 D4 F#4", "G2 D3 G3 B3"] * 2, start=8):
+        song += chord(text, bar)
+    used = chords_used(song, 64, 4)
+    assert [c["name"] for c in used[:2]] == ["E", "G"] and used[0]["beats"] == 16
+    assert used[0]["pitches"] == parse_notes("E2 B2 E3 G#3")
+    scales = likely_scales(song[: 4 * 8], 32, 4)
+    assert scales[0]["name"] == "E major" and scales[0]["fit"] == 1.0 and scales[0]["bars"] == [1, 8]
+    # Half the song in each key: one is the main scale, the other is reported for its own bars.
+    found = likely_scales(song, 64, 4)
+    changed = [s for s in found if s["bars"] != [1, 16]]
+    e_major, g_major = {4, 6, 8, 9, 11, 1, 3}, {7, 9, 11, 0, 2, 4, 6}
+    assert len(changed) == 1 and changed[0]["bars"] in ([1, 8], [9, 16])
+    here = e_major if changed[0]["bars"] == [1, 8] else g_major
+    assert set(changed[0]["pitch_classes"]) == here and set(found[0]["pitch_classes"]) == (g_major if here == e_major else e_major)
+
+
+def test_project_export_places_notes_in_bars(built, tmp_path, capsys):
+    copy = tmp_path / "memo.sketch.json"
+    copy.write_text(built.read_text())
+    cli.main(["edit", str(copy), "tempo", "90", "--bars", "3-4"])
+    cli.main(["project", str(copy)])
+    project = json.loads((tmp_path / "memo.project.json").read_text())
+    sketch = json.loads(copy.read_text())
+    assert len(project["bars"]) == sketch["bars"] and project["bars"][0]["beats"] == 4 and project["bars"][0]["division"] == 2
+    assert project["bars"][2]["bpm"] == 90 and project["bars"][0]["bpm"] != 90
+    assert [t["id"] for t in project["tracks"]] == ["guitar", "bass", "pad", "drums"] and project["tracks"][3]["kind"] == "drums"
+    first = sketch["notes"][0]
+    assert project["tracks"][0]["notes"][0] == [first["bar"] - 1, first["beat_in_bar"] - 1, first["length"], first["pitch"], first["velocity"]]
+    assert all(0 <= n[1] < 4 for t in project["tracks"] for n in t["notes"])
+    assert project["sections"][0] == {"name": "Part 1", "bar": 0} and len(project["sections"]) >= 2
+    assert project["chords"] and project["scales"] and "chords:" in capsys.readouterr().out
