@@ -105,3 +105,15 @@ def test_compressed_audio_loads_through_ffmpeg(tmp_path):
     subprocess.run(["ffmpeg", "-v", "error", "-i", str(wav), str(m4a)], check=True)
     result = analyse(m4a, engine="dsp")
     assert result.segments[0].lowest_note.pitch == 45
+
+
+def test_preview_is_playable_audio(tmp_path):
+    from extract.preview import write_preview
+    from extract.types import NoteEvent
+
+    original = render([(0.3, [45])], 2.0, seed=7)
+    path = write_preview(original, [NoteEvent(45, 0.3, 1.5, 0.8, 0.9)], tmp_path / "p.wav")
+    audio, sr = sf.read(path)
+    assert sr == SR and audio.shape == (len(original), 2)
+    right = audio[:, 1]
+    assert np.abs(right[: int(0.25 * SR)]).max() < 1e-3 < np.abs(right[int(0.35 * SR) :]).max()
