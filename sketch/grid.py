@@ -93,11 +93,7 @@ def find_grid(
     before = beats[0] - gap * np.arange(int(beats[0] // gap) + 8, 0, -1)
     after = beats[-1] + gap * np.arange(1, int((len(y) / SR - beats[-1]) // gap) + 8 + 1)
     times = np.concatenate([before, beats, after])
-    # The tracker tends to sit a little behind or ahead of where notes start.
-    # Slide the whole grid so the typical note lands exactly on an eighth.
-    played = np.interp([n.start for n in notes], times, np.arange(len(times)))
-    offset = float(np.median(played - np.round(played * 2) / 2)) if len(played) else 0.0
-    times = times + offset * gap
+    times = _align(times, notes, 2, gap)
 
     accents = _accents(times, notes)
     meter_confidence = 0.0
@@ -113,18 +109,73 @@ def find_grid(
     if downbeat_shift is not None:
         phase = (phase + downbeat_shift) % meter
 
+    return _bars(times, phase, meter, notes, len(y) / SR, gap, confidence, meter_confidence)
+
+
+def _align(times: np.ndarray, notes: list[NoteEvent], division: int, gap: float) -> np.ndarray:
+    """Slide the whole grid so the typical note start lands exactly on a subdivision."""
+    played = np.interp([n.start for n in notes], times, np.arange(len(times)))
+    offset = float(np.median(played - np.round(played * division) / division)) if len(played) else 0.0
+    return times + offset * gap
+
+
+def _bars(
+    times: np.ndarray, phase: int, meter: int, notes: list[NoteEvent], duration: float, gap: float,
+    downbeat_confidence: float, meter_confidence: float,
+) -> Grid:
+    """Start bar 1 on the last bar line at or before the first note, and end on a bar line after the last."""
     first_note = min((n.start for n in notes), default=0.0)
-    downbeats = [i for i in range(phase, len(times), meter) if times[i] <= first_note + 0.25 * gap]
-    origin = downbeats[-1] if downbeats else phase
-    last_note = max((n.end for n in notes), default=len(y) / SR)
+    downbeats = [i for i in range(phase % meter, len(times), meter) if times[i] <= first_note + 0.25 * gap]
+    origin = downbeats[-1] if downbeats else phase % meter
+    last_note = max((n.end for n in notes), default=duration)
     end = int(np.searchsorted(times, last_note)) + 1
-    end = origin + int(np.ceil((end - origin) / meter)) * meter  # finish on a bar line
+    end = origin + int(np.ceil((end - origin) / meter)) * meter
     while end >= len(times):
         times = np.append(times, times[-1] + gap)
     return Grid(
         beat_times=[round(float(t), 4) for t in times[origin : end + 1]],
         meter=meter,
         tempo_bpm=round(60.0 / gap, 1),
-        downbeat_confidence=round(confidence, 2),
+        downbeat_confidence=round(downbeat_confidence, 2),
         meter_confidence=meter_confidence,
     )
+
+
+def grid_from_taps(
+    taps: list[float], notes: list[NoteEvent], duration: float, meter: int = 4, division: int = 2,
+    downbeat_shift: int = 0,
+) -> Grid:
+    """Build the grid from beats a person tapped while listening.
+
+    The taps are the authority on where the beat is and how fast it moves.
+    They are only tidied: double-taps removed, missed beats and breaks filled
+    in at the local spacing, hand jitter smoothed a little, and the whole grid
+    slid so note starts sit on its subdivisions. `downbeat_shift` says which
+    tap is beat 1 (0 = the first tap). `division` is how the tapped beat
+    divides: 2 for straight, 3 for a triplet / compound feel.
+    """
+    taps = sorted(float(t) for t in taps)
+    if len(taps) < 4:
+        raise ValueError("need at least 4 taps to make a beat grid")
+    kept = [taps[0]]
+    for t in taps[1:]:
+        if t - kept[-1] >= 0.12:
+            kept.append(t)
+    filled = [kept[0], kept[1]]
+    for t in kept[2:]:
+        local = float(np.median(np.diff(filled[-5:])))
+        missing = int(round((t - filled[-1]) / local)) - 1
+        for k in range(1, missing + 1):
+            filled.append(filled[-1] + (t - filled[-1]) / (missing - k + 2))
+        filled.append(t)
+    times = np.asarray(filled)
+    smooth = times.copy()
+    smooth[1:-1] = 0.25 * times[:-2] + 0.5 * times[1:-1] + 0.25 * times[2:]
+    head, tail_gap = float(np.median(np.diff(smooth[:5]))), float(np.median(np.diff(smooth[-5:])))
+    n_before = int(smooth[0] // head) + 8
+    before = smooth[0] - head * np.arange(n_before, 0, -1)
+    after = smooth[-1] + tail_gap * np.arange(1, int(max(duration - smooth[-1], 0) // tail_gap) + 9)
+    gap = float(np.median(np.diff(smooth)))
+    times = _align(np.concatenate([before, smooth, after]), notes, division, gap)
+    phase = n_before + downbeat_shift
+    return _bars(times, phase, meter, notes, duration, gap, 1.0, 1.0)

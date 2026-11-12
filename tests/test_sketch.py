@@ -213,3 +213,39 @@ def test_parts_regenerate_and_tempo_and_show(built, tmp_path, capsys):
     assert "90.0 bpm, 4/4" in shown[0] and shown[1].startswith("bar   1 |") and len(shown) == 3
     with pytest.raises(SystemExit):
         cli.main(["edit", str(tmp_path / "memo.sketch.json"), "transpose", "1", "--bars", "99"])
+
+
+def test_tapped_beats_set_the_grid(tmp_path):
+    from sketch.grid import grid_from_taps
+
+    rng = np.random.default_rng(0)
+    beats = 2.0 + 0.75 * np.arange(24)  # the true beat: every 0.75 s from 2.0 s, each dividing in three
+    # Notes on every third of a beat; the first of each beat is the low one.
+    notes = [NoteEvent(45 if k == 0 else 57, b + k * 0.25, b + k * 0.25 + 0.2, 0.8, 0.9) for b in beats for k in range(3)]
+    taps = list(beats + 0.04 + rng.normal(0, 0.012, len(beats)))  # tapped a little late, with hand jitter
+    del taps[7]  # one missed beat
+    taps.insert(3, taps[3] + 0.05)  # one double tap
+    grid = grid_from_taps(taps, notes, duration=21.0, meter=2, division=3)
+    gaps = np.diff(grid.beat_times)
+    assert grid.meter == 2 and grid.tempo_bpm == pytest.approx(80, abs=2)
+    assert abs(gaps - 0.75).max() < 0.04  # the missed tap was filled in, the double tap dropped
+    assert abs(grid.beat_times[0] - 2.0) < 0.03  # bar 1 starts on the first tap, slid onto the note starts
+    cleaned, feels = clean(notes, grid, division=3)
+    assert set(feels[:24]) == {"triplets"} and time_signature(2, feels) == "6/8"
+    assert [n.beat for n in cleaned[:4]] == [0.0, 0.3333, 0.6667, 1.0]
+    shifted = grid_from_taps(taps, notes, duration=21.0, meter=2, division=3, downbeat_shift=1)
+    assert abs(shifted.beat_times[0] - 1.25) < 0.03  # beat 1 is the second tap, so bar 1 starts a beat earlier
+    with pytest.raises(ValueError):
+        grid_from_taps([1.0, 2.0], notes, duration=21.0)
+
+
+def test_build_uses_a_beats_file(built, tmp_path, capsys):
+    memo = built.with_name("memo.wav")
+    beats_file = tmp_path / "memo.beats.json"
+    # Tap every other eighth-note chord: half the tracker's tempo, three taps per bar.
+    beats_file.write_text(json.dumps({"taps": [0.5 + i for i in range(8)], "beats_per_bar": 3, "division": 2}))
+    cli.main(["build", str(memo), "--out", str(tmp_path), "--beats", str(beats_file), "--no-previews"])
+    sketch = json.loads((tmp_path / "memo.sketch.json").read_text())
+    assert sketch["beats_from"] == "taps" and sketch["meter"] == 3 and sketch["time_signature"] == "3/4"
+    assert sketch["tempo_bpm"] == pytest.approx(60, abs=1)
+    assert "your taps" in capsys.readouterr().out

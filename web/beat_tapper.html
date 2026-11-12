@@ -1,0 +1,377 @@
+<title>Beat Tapper</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: one column, in the order you use it — pick a memo, play, watch the strip, tap, set the bar, save. */
+:root {
+  --bg: #f3f4f1; --panel: #ffffff; --line: #d6d9d2; --fg: #1d211c; --muted: #636a60;
+  --wave: #b9c0b4; --note: #5e7a8c; --tap: #c2570c; --one: #1f7a4d; --guess: #9aa39a;
+  --head: #1d211c; --pad: #1f7a4d; --pad-fg: #ffffff; --warn: #a23b2a;
+  --display: "Space Grotesk", "Avenir Next", system-ui, sans-serif;
+  --body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #151815; --panel: #1e221e; --line: #343a33; --fg: #e8ebe4; --muted: #9aa297;
+  --wave: #4a5348; --note: #8fb3c9; --tap: #f0924a; --one: #5fce94; --guess: #6b746a;
+  --head: #e8ebe4; --pad: #2f9c66; --pad-fg: #0d130f; --warn: #ef8f7d; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #151815; --panel: #1e221e; --line: #343a33; --fg: #e8ebe4; --muted: #9aa297;
+  --wave: #4a5348; --note: #8fb3c9; --tap: #f0924a; --one: #5fce94; --guess: #6b746a;
+  --head: #e8ebe4; --pad: #2f9c66; --pad-fg: #0d130f; --warn: #ef8f7d; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 40px; }
+main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+h1 { font-family: var(--display); font-size: 26px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.lede { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+label, .label { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+select, button { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; min-height: 42px; }
+button { cursor: pointer; font-weight: 500; touch-action: manipulation; }
+button:hover { border-color: var(--muted); }
+button:focus-visible, select:focus-visible, canvas:focus-visible { outline: 2px solid var(--one); outline-offset: 2px; }
+button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+button:disabled { opacity: 0.45; cursor: default; }
+#play { min-width: 96px; font-weight: 600; }
+#clock { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 15px; margin-left: auto; }
+canvas { width: 100%; height: 190px; display: block; border-radius: 8px; background: var(--bg); touch-action: pan-y; cursor: grab; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+#tap { width: 100%; min-height: 104px; border: 0; border-radius: 12px; background: var(--pad); color: var(--pad-fg);
+  font-family: var(--display); font-size: 28px; font-weight: 600; letter-spacing: 0.02em; user-select: none; -webkit-user-select: none; }
+#tap:active, #tap.hit { filter: brightness(1.18); transform: scale(0.992); }
+#tap small { display: block; font-family: var(--body); font-size: 13px; font-weight: 500; opacity: 0.85; letter-spacing: 0; }
+.seg { display: inline-flex; align-self: flex-start; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; min-width: 44px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.fields { display: flex; flex-wrap: wrap; gap: 14px 22px; }
+#reading { font-family: var(--display); font-size: 18px; font-weight: 500; }
+#stats { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); }
+#save { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
+#status { font-size: 14px; min-height: 1.4em; }
+#status.bad { color: var(--warn); }
+textarea { width: 100%; box-sizing: border-box; min-height: 90px; font-family: var(--mono); font-size: 12px; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+ol.how { margin: 0; padding-left: 20px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+@media (prefers-reduced-motion: reduce) { #tap:active, #tap.hit { transform: none; } }
+</style>
+
+<main>
+  <header>
+    <h1>Beat Tapper</h1>
+    <p class="lede">Play a memo and tap where you feel the beat. Your taps replace the automatic guess when the song sketch is built.</p>
+  </header>
+
+  <section class="panel">
+    <div class="row">
+      <div class="field" style="flex:1; min-width:200px">
+        <label for="memo">Memo</label>
+        <select id="memo"></select>
+      </div>
+      <div class="field">
+        <label for="speed">Speed</label>
+        <select id="speed"><option value="1">1×</option><option value="0.75">0.75×</option><option value="0.5">0.5×</option></select>
+      </div>
+    </div>
+    <div class="row">
+      <button id="play" type="button">Play</button>
+      <button id="back" type="button" title="Back 5 seconds">−5 s</button>
+      <button id="start" type="button" title="Back to the start">Start</button>
+      <button id="click" type="button" aria-pressed="true" title="Hear a click on every tap you have laid down">Click on taps</button>
+      <span id="clock">0:00.0 / 0:00</span>
+    </div>
+    <canvas id="strip" tabindex="0" aria-label="Timeline: waveform, extracted notes and your taps. Drag to move through the memo."></canvas>
+    <div class="legend">
+      <span><i style="background:var(--wave)"></i>recording</span>
+      <span><i style="background:var(--note)"></i>extracted notes</span>
+      <span><i style="background:var(--tap)"></i>your taps</span>
+      <span><i style="background:var(--one)"></i>beat 1 of a bar</span>
+      <span id="guessLegend" hidden><i style="background:var(--guess)"></i>automatic guess</span>
+    </div>
+  </section>
+
+  <button id="tap" type="button">TAP<small>or press the space bar, while it plays</small></button>
+
+  <section class="panel">
+    <div class="fields">
+      <div class="field">
+        <span class="label">Taps per bar</span>
+        <div class="seg" id="perBar" role="group" aria-label="Taps per bar"></div>
+      </div>
+      <div class="field">
+        <span class="label">Each tap divides in</span>
+        <div class="seg" id="division" role="group" aria-label="Each tap divides in">
+          <button type="button" data-v="2">two</button><button type="button" data-v="3">three</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label">Beat 1 falls on</span>
+        <div class="row" style="gap:6px">
+          <button id="shiftDown" type="button" aria-label="Move beat 1 one tap earlier">◀</button>
+          <span id="shiftText" style="min-width:5.5em; text-align:center">tap 1</span>
+          <button id="shiftUp" type="button" aria-label="Move beat 1 one tap later">▶</button>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div id="reading">No taps yet</div>
+      <div id="stats"></div>
+    </div>
+    <div class="row">
+      <button id="undo" type="button">Undo last tap</button>
+      <button id="trim" type="button" title="Remove every tap after the playhead, to redo from here">Delete taps after playhead</button>
+      <button id="earlier" type="button" title="Move all taps 10 ms earlier">All 10 ms earlier</button>
+      <button id="later" type="button" title="Move all taps 10 ms later">All 10 ms later</button>
+      <button id="useGuess" type="button" hidden>Start from the automatic guess</button>
+      <button id="clear" type="button">Clear all</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="row">
+      <button id="save" type="button">Save taps</button>
+      <span id="status" role="status"></span>
+    </div>
+    <details>
+      <summary>Copy the taps as text instead</summary>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px">
+        <textarea id="json" readonly aria-label="Taps as JSON"></textarea>
+        <div><button id="copy" type="button">Copy</button></div>
+      </div>
+    </details>
+  </section>
+
+  <section>
+    <ol class="how">
+      <li>Press Play and tap along the way your foot would. Skip the silence at the start; just begin when you do.</li>
+      <li>Stop tapping during a break and pick it up again after. Missed beats inside a passage are filled in.</li>
+      <li>Play it back with the click on. If a stretch is off, move there, delete the taps after the playhead and redo it.</li>
+      <li>Set taps per bar and whether each tap divides in two or three, check beat 1, then save.</li>
+    </ol>
+  </section>
+</main>
+
+<script>
+(() => {
+  const MEMOS = [
+    { id: "Voice_250929_161042", label: "29 Sep 2025, 16:10 (2:52)" },
+    { id: "Voice_251221_120247", label: "21 Dec 2025, 12:02 (3:04)" },
+  ];
+  const $ = (id) => document.getElementById(id);
+  const audio = new Audio();
+  audio.preload = "auto";
+  const state = { memo: null, taps: [], perBar: 4, division: 2, shift: 0, notes: [], guess: [], peaks: null, duration: 0, dirty: false, click: true };
+  let db = null, ctx = null, lastClickIdx = -1, loadToken = 0;
+  let clock = { t: 0, at: performance.now() };
+
+  // ---------- time ----------
+  function now() { // smoother than audio.currentTime alone, which some browsers update in steps
+    if (audio.paused) return audio.currentTime;
+    return Math.min(clock.t + ((performance.now() - clock.at) / 1000) * audio.playbackRate, state.duration || Infinity);
+  }
+  function syncClock() { clock = { t: audio.currentTime, at: performance.now() }; }
+  audio.addEventListener("timeupdate", syncClock);
+  audio.addEventListener("seeked", () => { syncClock(); lastClickIdx = firstTapAfter(audio.currentTime) - 1; });
+  audio.addEventListener("play", syncClock);
+  audio.addEventListener("pause", () => { $("play").textContent = "Play"; });
+  audio.addEventListener("playing", () => { syncClock(); $("play").textContent = "Pause"; });
+  audio.addEventListener("ended", () => { $("play").textContent = "Play"; });
+  audio.addEventListener("loadedmetadata", () => { if (isFinite(audio.duration)) state.duration = audio.duration; });
+  const fmt = (t, tenths) => { const m = Math.floor(t / 60), s = t - m * 60; return m + ":" + (tenths ? s.toFixed(1).padStart(4, "0") : String(Math.floor(s)).padStart(2, "0")); };
+  function firstTapAfter(t) { let i = 0; while (i < state.taps.length && state.taps[i] <= t) i++; return i; }
+
+  // ---------- sound ----------
+  function ensureCtx() {
+    if (!ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) ctx = new AC(); }
+    if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
+  }
+  function blip(strong) {
+    if (!ctx) return;
+    const o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime;
+    o.frequency.value = strong ? 1568 : 1046; o.type = "square";
+    g.gain.setValueAtTime(strong ? 0.22 : 0.13, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.06);
+  }
+  const isOne = (i) => (((i - state.shift) % state.perBar) + state.perBar) % state.perBar === 0;
+
+  // ---------- taps ----------
+  function tap() {
+    if (audio.paused || !state.memo) return;
+    const t = Math.round(now() * 1000) / 1000;
+    const i = firstTapAfter(t);
+    if (i > 0 && t - state.taps[i - 1] < 0.12) return; // a bounce, not a beat
+    state.taps.splice(i, 0, t); lastClickIdx = i;
+    changed();
+    $("tap").classList.add("hit"); setTimeout(() => $("tap").classList.remove("hit"), 70);
+  }
+  function changed() { state.dirty = true; draft(); describe(); }
+  function draft() { try { localStorage.setItem("taps:" + state.memo, JSON.stringify(payload())); } catch (e) {} }
+  function payload() {
+    return { source: state.memo + ".m4a", taps: state.taps, beats_per_bar: state.perBar, division: state.division, downbeat_shift: state.shift };
+  }
+  function apply(p) {
+    state.taps = (p.taps || []).map(Number).filter(isFinite).sort((a, b) => a - b);
+    state.perBar = p.beats_per_bar || 4; state.division = p.division || 2; state.shift = p.downbeat_shift || 0;
+  }
+  function describe() {
+    const n = state.taps.length;
+    for (const b of $("perBar").children) b.setAttribute("aria-pressed", String(+b.dataset.v === state.perBar));
+    for (const b of $("division").children) b.setAttribute("aria-pressed", String(+b.dataset.v === state.division));
+    $("shiftText").textContent = "tap " + (state.shift + 1);
+    $("json").value = JSON.stringify(payload());
+    $("undo").disabled = $("clear").disabled = $("trim").disabled = $("earlier").disabled = $("later").disabled = n === 0;
+    if (n < 2) { $("reading").textContent = n ? "1 tap" : "No taps yet"; $("stats").textContent = ""; return; }
+    const gaps = []; for (let i = 1; i < n; i++) gaps.push(state.taps[i] - state.taps[i - 1]);
+    const sorted = gaps.slice().sort((a, b) => a - b), med = sorted[sorted.length >> 1];
+    const steady = gaps.filter((g) => g < 1.6 * med);
+    const q = Math.max(1, Math.floor(steady.length / 4));
+    const bpm = (arr) => 60 / (arr.slice().sort((a, b) => a - b)[arr.length >> 1] || med);
+    const sig = state.division === 3 ? state.perBar * 3 + "/8" : state.perBar + "/4";
+    $("reading").textContent = `${state.perBar} taps per bar, each in ${state.division === 3 ? "three" : "two"}: ${sig}`;
+    $("stats").textContent = `${n} taps · ${Math.ceil(n / state.perBar)} bars · ${bpm(steady).toFixed(0)} per minute` +
+      (steady.length >= 16 ? ` (starts ${bpm(steady.slice(0, q)).toFixed(0)}, ends ${bpm(steady.slice(-q)).toFixed(0)})` : "") +
+      ` · first ${fmt(state.taps[0], true)} · last ${fmt(state.taps[n - 1], true)}`;
+  }
+
+  // ---------- drawing ----------
+  const canvas = $("strip"), g2 = canvas.getContext("2d");
+  const SPAN = 8, HEAD = 0.3; // seconds shown; playhead position across the strip
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  function draw() {
+    const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+    if (canvas.width !== Math.round(w * dpr)) { canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr); }
+    g2.setTransform(dpr, 0, 0, dpr, 0, 0); g2.clearRect(0, 0, w, h);
+    const t = now(), t0 = t - SPAN * HEAD, t1 = t0 + SPAN, x = (s) => ((s - t0) / SPAN) * w;
+    const waveH = h * 0.42, noteTop = waveH + 8, noteH = h - noteTop - 18;
+    if (state.peaks) { // recording
+      g2.fillStyle = css("--wave"); const rate = state.peaks.rate, mid = waveH / 2 + 2;
+      for (let i = Math.max(0, Math.floor(t0 * rate)); i < Math.min(state.peaks.data.length, t1 * rate); i++) {
+        const a = state.peaks.data[i] * (waveH / 2 - 2); g2.fillRect(x(i / rate), mid - a, Math.max(1, w / (SPAN * rate) - 0.5), Math.max(1, 2 * a));
+      }
+    }
+    g2.fillStyle = css("--note"); // extracted notes, low pitches at the bottom
+    for (const [s, e, p] of state.notes) {
+      if (e < t0 || s > t1) continue;
+      const y = noteTop + noteH * (1 - (Math.min(Math.max(p, 38), 84) - 38) / 46);
+      g2.fillRect(x(s), y - 1.5, Math.max(2, x(e) - x(s) - 1), 3);
+    }
+    if (!state.taps.length && state.guess.length) { // automatic guess, only until you tap
+      g2.strokeStyle = css("--guess"); g2.lineWidth = 1; g2.setLineDash([3, 4]);
+      for (const s of state.guess) { if (s < t0 || s > t1) continue; g2.beginPath(); g2.moveTo(x(s), 4); g2.lineTo(x(s), h - 18); g2.stroke(); }
+      g2.setLineDash([]);
+    }
+    g2.font = "600 11px " + css("--mono"); g2.textBaseline = "bottom";
+    for (let i = firstTapAfter(t0); i < state.taps.length && state.taps[i] <= t1; i++) { // taps
+      const one = isOne(i), px = x(state.taps[i]);
+      g2.fillStyle = one ? css("--one") : css("--tap"); g2.fillRect(px - (one ? 1.5 : 0.75), one ? 2 : 14, one ? 3 : 1.5, h - (one ? 20 : 32));
+      if (one) { g2.textBaseline = "top"; g2.fillText(String(Math.floor((i - state.shift) / state.perBar) + 1), px + 5, 3); g2.textBaseline = "bottom"; }
+    }
+    g2.fillStyle = css("--head"); g2.fillRect(w * HEAD - 1, 0, 2, h - 16); // playhead
+    g2.fillStyle = css("--muted"); g2.textBaseline = "bottom"; g2.font = "11px " + css("--mono");
+    for (let s = Math.ceil(t0); s <= t1; s++) if (s >= 0 && s % 2 === 0 && Math.abs(x(s) - w * HEAD) > 28) g2.fillText(fmt(s), x(s) - 10, h - 2);
+    $("clock").textContent = fmt(t, true) + " / " + fmt(state.duration || 0);
+    if (!audio.paused && state.click) { // click on laid-down taps as the playhead passes them
+      const i = firstTapAfter(t) - 1;
+      if (i > lastClickIdx && i >= 0 && t - state.taps[i] < 0.08) blip(isOne(i));
+      lastClickIdx = Math.max(lastClickIdx, i);
+    }
+    requestAnimationFrame(draw);
+  }
+  let drag = null; // drag the strip to move through the memo
+  canvas.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, t: audio.currentTime }; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = "grabbing"; });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const t = drag.t - ((e.clientX - drag.x) / canvas.clientWidth) * SPAN;
+    audio.currentTime = Math.min(Math.max(0, t), Math.max(0, (state.duration || 0) - 0.05)); syncClock();
+  });
+  const endDrag = () => { drag = null; canvas.style.cursor = "grab"; };
+  canvas.addEventListener("pointerup", endDrag); canvas.addEventListener("pointercancel", endDrag);
+  canvas.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") { audio.currentTime = Math.max(0, audio.currentTime + (e.key === "ArrowLeft" ? -1 : 1)); syncClock(); e.preventDefault(); }
+  });
+
+  // ---------- loading ----------
+  async function load(id) {
+    const token = ++loadToken;
+    audio.pause(); state.memo = id; state.notes = []; state.guess = []; state.peaks = null; state.taps = []; state.dirty = false;
+    state.perBar = 4; state.division = 2; state.shift = 0; lastClickIdx = -1;
+    audio.src = id + ".mp3"; audio.playbackRate = +$("speed").value; syncClock();
+    setStatus("");
+    try { const d = JSON.parse(localStorage.getItem("taps:" + id) || "null"); if (d && d.taps && d.taps.length) { apply(d); state.dirty = true; setStatus("Unsaved taps restored from this browser."); } } catch (e) {}
+    describe();
+    fetch(id + ".notes.json").then((r) => r.json()).then((d) => {
+      if (token !== loadToken) return;
+      state.notes = d.notes || []; state.guess = d.auto_beats || []; state.duration = state.duration || d.duration;
+      $("useGuess").hidden = $("guessLegend").hidden = !state.guess.length;
+    }).catch(() => {});
+    fetch(id + ".mp3").then((r) => r.arrayBuffer()).then((buf) => {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
+      const dec = ctx || new AC(); if (!ctx) ctx = dec;
+      return new Promise((ok, no) => dec.decodeAudioData(buf, ok, no));
+    }).then((ab) => {
+      if (!ab || token !== loadToken) return;
+      const ch = ab.getChannelData(0), rate = 60, step = Math.floor(ab.sampleRate / rate), data = new Float32Array(Math.floor(ch.length / step));
+      let top = 0;
+      for (let i = 0; i < data.length; i++) { let m = 0; for (let j = i * step; j < (i + 1) * step; j += 8) { const v = Math.abs(ch[j]); if (v > m) m = v; } data[i] = m; if (m > top) top = m; }
+      if (top > 0) for (let i = 0; i < data.length; i++) data[i] = Math.sqrt(data[i] / top);
+      state.peaks = { rate, data }; state.duration = ab.duration;
+    }).catch(() => {});
+    if (db) {
+      try {
+        const snap = await db.doc("beats/" + id).get();
+        if (token !== loadToken) return;
+        if (snap.exists && !state.dirty) { apply(snap.data()); state.dirty = false; describe(); setStatus("Loaded your saved taps (" + state.taps.length + ")."); }
+      } catch (e) {}
+    }
+  }
+  function setStatus(text, bad) { $("status").textContent = text; $("status").classList.toggle("bad", !!bad); }
+
+  // ---------- controls ----------
+  for (const m of MEMOS) $("memo").add(new Option(m.label, m.id));
+  for (const v of [2, 3, 4, 6]) { const b = document.createElement("button"); b.type = "button"; b.dataset.v = v; b.textContent = v; $("perBar").append(b); }
+  $("memo").addEventListener("change", () => load($("memo").value));
+  $("speed").addEventListener("change", () => { audio.playbackRate = +$("speed").value; syncClock(); });
+  function toggle() { ensureCtx(); if (audio.paused) audio.play().catch(() => setStatus("The memo could not be played here.", true)); else audio.pause(); }
+  $("play").addEventListener("click", toggle);
+  $("back").addEventListener("click", () => { audio.currentTime = Math.max(0, audio.currentTime - 5); syncClock(); });
+  $("start").addEventListener("click", () => { audio.currentTime = 0; syncClock(); });
+  $("click").addEventListener("click", () => { state.click = !state.click; $("click").setAttribute("aria-pressed", String(state.click)); });
+  $("tap").addEventListener("pointerdown", (e) => { e.preventDefault(); ensureCtx(); tap(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.target.matches("select, textarea")) return;
+    if (e.code === "Space") { e.preventDefault(); if (!e.repeat) tap(); }
+    else if (e.key === "Enter" && !e.target.matches("button")) { e.preventDefault(); toggle(); }
+  });
+  $("perBar").addEventListener("click", (e) => { if (e.target.dataset.v) { state.perBar = +e.target.dataset.v; state.shift %= state.perBar; changed(); } });
+  $("division").addEventListener("click", (e) => { if (e.target.dataset.v) { state.division = +e.target.dataset.v; changed(); } });
+  $("shiftUp").addEventListener("click", () => { state.shift = (state.shift + 1) % state.perBar; changed(); });
+  $("shiftDown").addEventListener("click", () => { state.shift = (state.shift - 1 + state.perBar) % state.perBar; changed(); });
+  $("undo").addEventListener("click", () => { state.taps.pop(); changed(); });
+  $("trim").addEventListener("click", () => { state.taps = state.taps.filter((t) => t <= now()); changed(); });
+  $("clear").addEventListener("click", () => { state.taps = []; changed(); });
+  const nudge = (d) => { state.taps = state.taps.map((t) => Math.max(0, Math.round((t + d) * 1000) / 1000)); changed(); };
+  $("earlier").addEventListener("click", () => nudge(-0.01));
+  $("later").addEventListener("click", () => nudge(0.01));
+  $("useGuess").addEventListener("click", () => { state.taps = state.guess.filter((t) => t >= 0 && t <= (state.duration || 1e9)).map((t) => Math.round(t * 1000) / 1000); changed(); setStatus("Loaded the automatic guess as taps. Fix what is wrong, then save."); });
+  $("save").addEventListener("click", async () => {
+    if (state.taps.length < 4) return setStatus("Tap at least four beats first.", true);
+    if (!db) return setStatus("Saving is not available in this view. Copy the taps as text below and paste them to Claude.", true);
+    $("save").disabled = true; setStatus("Saving…");
+    try {
+      await db.doc("beats/" + state.memo).set({ ...payload(), saved_at: new Date().toISOString() });
+      state.dirty = false; try { localStorage.removeItem("taps:" + state.memo); } catch (e) {}
+      setStatus(`Saved ${state.taps.length} taps at ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. Tell Claude they are ready.`);
+    } catch (e) { setStatus("Could not save (" + ((e && e.code) || "error") + "). Copy the taps as text below instead.", true); }
+    $("save").disabled = false;
+  });
+  $("copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText($("json").value); setStatus("Copied."); } catch (e) { $("json").focus(); $("json").select(); setStatus("Select all and copy the text in the box."); }
+  });
+
+  load(MEMOS[0].id);
+  requestAnimationFrame(draw);
+  if (window.claude && window.claude.use) window.claude.use("db").then((d) => { db = d; if (d && !state.dirty && !state.taps.length) load(state.memo); }).catch(() => {});
+})();
+</script>

@@ -71,9 +71,26 @@ a light tidy, kept for comparison; do not edit). Each note is one line:
 
 Claude cannot hear audio. After a change that affects how something sounds, send the user the preview and ask.
 
+## Tapped beats
+
+The automatic beat tracker is only a first guess: it cannot tell where the user
+feels the beat (their foot may tap in 2 while the strumming divides in 3), and
+it struggles with tempo changes, breaks and syncopation. The user's taps are
+the authority.
+
+- The user taps along in the Beat Tapper page: https://claude.ai/artifact/AjbYrxZpnaakiAdREKdsWK
+  (source in `web/beat_tapper.html`; the page also needs each memo as `NAME.mp3` and `NAME.notes.json` published beside it).
+- Saved taps land in that artifact's database, collection `beats`, one document per memo (id = the memo's file stem).
+  Read them with the `ArtifactData` tool and write the document's fields to `data/beats/NAME.beats.json`:
+  `{"taps": [seconds...], "beats_per_bar": 2, "division": 3, "downbeat_shift": 0}`.
+- `sketch build` uses `data/beats/NAME.beats.json` automatically when it exists (`--no-beats` ignores it, `--beats FILE` names another).
+  The sketch records which was used in `beats_from` (`taps` or `tracker`).
+- `division` 3 means each tapped beat divides in three: triplets become the plain feel and the time signature is written as 6/8, 9/8 or 12/8.
+- Taps are only tidied, never second-guessed: double taps dropped, missed beats and breaks filled at the local spacing, jitter smoothed, and the grid slid so note starts sit on its subdivisions.
+
 ## Known limits
 
-- Bar lines and bar length are a guess (`downbeat_confidence` is low on the current memos, and no meter stood out, so both default to 4/4). `--meter` and `--downbeat-shift` on `sketch build` override them. Drums suffer most when they are wrong.
+- Without tapped beats, bar lines and bar length are a guess (`downbeat_confidence` is low on the current memos, and no meter stood out, so both default to 4/4). `--meter` and `--downbeat-shift` on `sketch build` override them. Drums suffer most when they are wrong.
 - The beat tracker can sit half a beat out for a stretch, which puts strums on the "and" and the kick in the wrong place there.
 - Generated parts are plain on purpose: bass plays the lowest pitch class every two beats, pad holds the main pitch classes, drums are kick/snare/hat.
 - The signal-processing engine (`--engine dsp`) gives nonsense on the real memos; the sketch always uses the model engine.

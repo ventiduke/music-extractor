@@ -18,7 +18,7 @@ from extract.preview import write_audio
 from extract.types import NoteEvent, note_name
 
 from . import synth
-from .grid import Grid, find_grid
+from .grid import Grid, find_grid, grid_from_taps
 from .harmony import estimate_key, harmony_spans
 from .parts import HAT, KICK, PART_NAMES, SNARE, make_parts
 from .rhythm import clean, expand, runs, time_signature
@@ -62,21 +62,33 @@ def feels_of(sketch: dict) -> list[str]:
 
 def build(
     audio: str | Path, meter: int | None = None, downbeat_shift: int | None = None,
-    templates=None, tuning: str | None = None, parts: bool = True,
+    templates=None, tuning: str | None = None, parts: bool = True, beats: str | Path | None = None,
 ) -> dict:
+    """Memo -> sketch. With `beats` (a tapped-beat file), the taps set the grid instead of the beat tracker."""
     audio = Path(audio)
     kwargs = {"tuning": tuning} if tuning else {}
     result = analyse(audio, engine="model", templates=templates, **kwargs)
     if not result.notes:
         raise SystemExit(f"{audio.name}: no notes found")
-    grid = find_grid(load(audio), result.notes, meter=meter, downbeat_shift=downbeat_shift)
+    division = 2
+    if beats is not None:
+        tapped = json.loads(Path(beats).read_text())
+        division = int(tapped.get("division", 2))
+        grid = grid_from_taps(
+            tapped["taps"], result.notes, result.duration,
+            meter=meter or int(tapped.get("beats_per_bar", 4)), division=division,
+            downbeat_shift=int(tapped.get("downbeat_shift", 0)) if downbeat_shift is None else downbeat_shift,
+        )
+    else:
+        grid = find_grid(load(audio), result.notes, meter=meter, downbeat_shift=downbeat_shift)
     light, dropped = tidy(result.notes, grid)
-    notes, feels = clean(result.notes, grid)
+    notes, feels = clean(result.notes, grid, division)
     n_beats = len(grid.beat_times) - 1
     generated = make_parts(notes, n_beats, grid.meter, feels) if parts else {}
     sketch = {
         "version": VERSION,
         "source": str(audio),
+        "beats_from": "taps" if beats is not None else "tracker",
         "tempo_bpm": grid.tempo_bpm,
         "meter": grid.meter,
         "meter_confidence": grid.meter_confidence,
@@ -102,6 +114,7 @@ def refresh(sketch: dict) -> dict:
     ordered = {
         "version": VERSION,
         "source": sketch["source"],
+        "beats_from": sketch.get("beats_from", "tracker"),
         "tempo_bpm": sketch["tempo_bpm"],
         "meter": grid.meter,
         "time_signature": time_signature(grid.meter, feels_of(sketch)),
