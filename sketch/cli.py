@@ -64,7 +64,9 @@ def main(argv: list[str] | None = None) -> None:
     rep.add_argument("bars")
     rep.add_argument("--times", type=int, default=1)
     ops.add_parser("delete", help="cut these bars out").add_argument("bars")
-    ops.add_parser("tempo", help="set the steady tempo").add_argument("bpm", type=float)
+    tp = ops.add_parser("tempo", help="set the steady tempo, for the whole song or for some bars")
+    tp.add_argument("bpm", type=float)
+    tp.add_argument("--bars", help="e.g. 5-8 (default: whole song)")
 
     args = parser.parse_args(argv)
     from . import build as sk
@@ -79,7 +81,9 @@ def main(argv: list[str] | None = None) -> None:
             )
             print(f"beat grid from {'your taps (' + str(beats) + ')' if beats else 'the automatic tracker'}")
             path = sk.write(sketch, args.out / f"{audio.stem}.sketch.json")
-            print(edit.overview(sketch).split("\n")[0])
+            if sketch["division_from"].startswith("notes"):
+                print(f"each beat divides in {sketch['division']}, going by the {sketch['division_from']}")
+            print("\n".join(line for line in edit.overview(sketch).split("\n") if not line.startswith("bar ")))
             for made in [path, *sk.render(path, previews=not args.no_previews, light=True)]:
                 print(f"  {made}")
     elif args.command == "render":
@@ -112,7 +116,7 @@ def main(argv: list[str] | None = None) -> None:
         elif args.op == "delete":
             edit.delete(sketch, args.bars)
         elif args.op == "tempo":
-            edit.tempo(sketch, args.bpm)
+            edit.tempo(sketch, args.bpm, args.bars)
         sketch = sk.refresh(sketch)
         sk.write(sketch, args.sketch)
         print(edit.overview(sketch).split("\n")[0])

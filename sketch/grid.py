@@ -17,6 +17,8 @@ import numpy as np
 from extract.audio import HOP, SR
 from extract.types import NoteEvent
 
+from .tempo import refine
+
 
 @dataclass
 class Grid:
@@ -150,25 +152,14 @@ def grid_from_taps(
     The taps are the authority on where the beat is and how fast it moves.
     They are only tidied: double-taps removed, missed beats and breaks filled
     in at the local spacing, hand jitter smoothed a little, and the whole grid
-    slid so note starts sit on its subdivisions. `downbeat_shift` says which
+    slid so note starts sit on its subdivisions, then each beat is
+    sharpened by the strums around it (see tempo.refine). `downbeat_shift` says which
     tap is beat 1 (0 = the first tap). `division` is how the tapped beat
     divides: 2 for straight, 3 for a triplet / compound feel.
     """
-    taps = sorted(float(t) for t in taps)
     if len(taps) < 4:
         raise ValueError("need at least 4 taps to make a beat grid")
-    kept = [taps[0]]
-    for t in taps[1:]:
-        if t - kept[-1] >= 0.12:
-            kept.append(t)
-    filled = [kept[0], kept[1]]
-    for t in kept[2:]:
-        local = float(np.median(np.diff(filled[-5:])))
-        missing = int(round((t - filled[-1]) / local)) - 1
-        for k in range(1, missing + 1):
-            filled.append(filled[-1] + (t - filled[-1]) / (missing - k + 2))
-        filled.append(t)
-    times = np.asarray(filled)
+    times = tapped_times(taps)
     smooth = times.copy()
     smooth[1:-1] = 0.25 * times[:-2] + 0.5 * times[1:-1] + 0.25 * times[2:]
     head, tail_gap = float(np.median(np.diff(smooth[:5]))), float(np.median(np.diff(smooth[-5:])))
@@ -177,5 +168,34 @@ def grid_from_taps(
     after = smooth[-1] + tail_gap * np.arange(1, int(max(duration - smooth[-1], 0) // tail_gap) + 9)
     gap = float(np.median(np.diff(smooth)))
     times = _align(np.concatenate([before, smooth, after]), notes, division, gap)
+    times = refine(times, strum_onsets(notes), division)
     phase = n_before + downbeat_shift
     return _bars(times, phase, meter, notes, duration, gap, 1.0, 1.0)
+
+
+def strum_onsets(notes: list[NoteEvent], window: float = 0.06) -> np.ndarray:
+    """Start time of each strum (notes beginning within `window` of each other are one strum)."""
+    onsets: list[float] = []
+    last = None
+    for t in sorted(n.start for n in notes):
+        if last is None or t - last > window:
+            onsets.append(t)
+        last = t
+    return np.asarray(onsets)
+
+
+def tapped_times(taps: list[float]) -> np.ndarray:
+    """Taps with double taps dropped and missed beats filled in, before any alignment to the notes."""
+    taps = sorted(float(t) for t in taps)
+    kept = [taps[0]]
+    for t in taps[1:]:
+        if t - kept[-1] >= 0.12:
+            kept.append(t)
+    filled = kept[:2]
+    for t in kept[2:]:
+        local = float(np.median(np.diff(filled[-5:])))
+        missing = int(round((t - filled[-1]) / local)) - 1
+        for k in range(1, missing + 1):
+            filled.append(filled[-1] + (t - filled[-1]) / (missing - k + 2))
+        filled.append(t)
+    return np.asarray(filled)

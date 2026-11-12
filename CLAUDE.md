@@ -31,7 +31,7 @@ by editing the file directly, then run `sketch render`.
 | `thin [--grid 1] [--min-velocity 0.5] [--bars] [--part]` | Keep only notes on multiples of `grid` beats and/or loud enough (default part: guitar) |
 | `repeat 5-8 [--times 2]` | Play those bars again right after themselves |
 | `delete 5-8` | Cut those bars out |
-| `tempo 120` | Set the steady tempo |
+| `tempo 120 [--bars 5-8]` | Set the steady tempo of those bars (default: the whole song, as one section) |
 
 Bars are 1-based and inclusive. `--part` takes any of `guitar bass pad drums all` (default `all`).
 Every edit is appended to `history` in the sketch.
@@ -52,6 +52,7 @@ a light tidy, kept for comparison; do not edit). Each note is one line:
 - Drum pitches are General MIDI: 36 kick, 38 snare, 42 closed hi-hat.
 - `feel` says how each run of beats is divided: `eighths`, `sixteenths` or `triplets`. The hi-hat follows it.
 - `harmony` lists stretches of beats with the same bass note and pitch classes. There are deliberately no chord names.
+- `tempo_map` splits the song into steady-tempo sections (`bar`, `bars`, `bpm`, and `looseness_ms`: how far single beats strayed inside that section). The MIDI and the "steady" previews follow it: each section keeps its tempo, wobble inside a section is removed. A change must last two bars and be about 5% to make a section. Whether a section's tempo was *meant* is the user's call: ask, then use `edit tempo` to keep, change or flatten it.
 - `beat_times[i]` is when beat `i` happens in the original memo. The memo was played without a click, so beats are not evenly spaced. Do not edit it by hand.
 - `dropped` holds notes removed as blips, in memo seconds, with reasons.
 - `structure_edited` turns true after `repeat` or `delete`. From then on the sketch no longer lines up with the recording, so the play-along previews are skipped.
@@ -86,7 +87,9 @@ the authority.
 - `sketch build` uses `data/beats/NAME.beats.json` automatically when it exists (`--no-beats` ignores it, `--beats FILE` names another).
   The sketch records which was used in `beats_from` (`taps` or `tracker`).
 - `division` 3 means each tapped beat divides in three: triplets become the plain feel and the time signature is written as 6/8, 9/8 or 12/8.
-- Taps are only tidied, never second-guessed: double taps dropped, missed beats and breaks filled at the local spacing, jitter smoothed, and the grid slid so note starts sit on its subdivisions.
+- Taps say which beat; the strums say exactly when. Taps are tidied (double taps dropped, missed beats and breaks filled at the local spacing, jitter smoothed), slid so note starts sit on the subdivisions, then each beat is sharpened by the strums around it (`sketch/tempo.py`). The user's taps land within about 50 ms of the strums.
+- If the notes clearly sit on thirds of the tapped beat when the file says two (or the reverse), the notes win; the sketch says so in `division_from`.
+- Bar lines come from the taps (`beats_per_bar`, `downbeat_shift`). The user says their "1" sometimes slips; there is no reliable detector for that yet.
 
 ## Known limits
 

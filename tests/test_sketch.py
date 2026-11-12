@@ -210,7 +210,7 @@ def test_parts_regenerate_and_tempo_and_show(built, tmp_path, capsys):
     capsys.readouterr()
     cli.main(["show", str(tmp_path / "memo.sketch.json"), "--bars", "1-2"])
     shown = capsys.readouterr().out.splitlines()
-    assert "90.0 bpm, 4/4" in shown[0] and shown[1].startswith("bar   1 |") and len(shown) == 3
+    assert "90 bpm, 4/4" in shown[0] and shown[1].startswith("bar   1 |") and len(shown) == 3
     with pytest.raises(SystemExit):
         cli.main(["edit", str(tmp_path / "memo.sketch.json"), "transpose", "1", "--bars", "99"])
 
@@ -249,3 +249,57 @@ def test_build_uses_a_beats_file(built, tmp_path, capsys):
     assert sketch["beats_from"] == "taps" and sketch["meter"] == 3 and sketch["time_signature"] == "3/4"
     assert sketch["tempo_bpm"] == pytest.approx(60, abs=1)
     assert "your taps" in capsys.readouterr().out
+
+
+def test_tempo_sections_keep_real_changes_and_ignore_wobble():
+    from sketch.tempo import as_sections, best_division, per_beat, refine, steady_times, tempo_sections
+
+    rng = np.random.default_rng(2)
+    # 8 bars at 100, then 8 bars at 120, with 15 ms of human wobble on every beat.
+    gaps = np.concatenate([np.full(32, 0.6), np.full(32, 0.5)])
+    truth = np.concatenate([[1.0], 1.0 + np.cumsum(gaps)])
+    played = truth + rng.normal(0, 0.015, len(truth))
+    sections = tempo_sections(list(played), meter=4)
+    assert [(s["beat"], s["length"]) for s in sections] == [(0, 32), (32, 32)]
+    assert sections[0]["bpm"] == pytest.approx(100, abs=3) and sections[1]["bpm"] == pytest.approx(120, abs=3)
+    assert 5 <= sections[0]["looseness_ms"] <= 45
+    # One slow bar in the middle of a steady piece is wobble, not a section.
+    one_slow_bar = np.concatenate([[0.0], np.cumsum(np.concatenate([np.full(16, 0.5), np.full(4, 0.56), np.full(16, 0.5)]))])
+    assert len(tempo_sections(list(one_slow_bar), meter=4)) == 1
+
+    bpms = per_beat(sections, 64, 110.0)
+    assert as_sections(bpms, sections)[1]["looseness_ms"] == sections[1]["looseness_ms"]
+    steady = steady_times(bpms)
+    assert np.allclose(np.diff(steady)[:32], 60 / sections[0]["bpm"]) and np.allclose(np.diff(steady)[32:], 60 / sections[1]["bpm"])
+
+    # Taps 40 ms off with jitter are pulled onto the strums; thirds are recognised.
+    strums = np.concatenate([truth[:-1] + k * np.diff(truth) / 3 for k in range(3)])
+    taps = truth + 0.04 + rng.normal(0, 0.03, len(truth))
+    assert best_division(taps, np.sort(strums))[0] == 3
+    assert best_division(taps, truth)[0] == 0 or best_division(taps, np.sort(np.concatenate([truth, truth[:-1] + np.diff(truth) / 2])))[0] == 2
+    refined = refine(taps - 0.04, np.sort(strums), division=3)
+    assert np.abs(refined - truth)[2:-2].mean() < 0.6 * np.abs(taps - 0.04 - truth).mean()
+
+
+def test_midi_carries_tempo_changes_and_compound_time(built, tmp_path, capsys):
+    import mido
+
+    after = _edit(built, tmp_path, "tempo", "90", "--bars", "3-4")
+    assert (3, 2, 90.0) in [(t["bar"], t["bars"], t["bpm"]) for t in after["tempo_map"]]
+    cli.main(["render", str(tmp_path / "memo.sketch.json"), "--no-previews"])
+    midi = mido.MidiFile(str(tmp_path / "memo.arr.mid"))
+    tempos = [(m.time, round(mido.tempo2bpm(m.tempo))) for m in midi.tracks[0] if m.type == "set_tempo"]
+    ticks = np.cumsum([t for t, _ in tempos])
+    assert (8 * 480, 90) in [(int(tick), bpm) for tick, (_, bpm) in zip(ticks, tempos)]  # on the bar line of bar 3
+    first_note = next(m for m in midi.tracks[1] if m.type == "note_on")
+    assert first_note.time % 240 == 0  # notes sit exactly on the eighth-note grid
+
+    sketch = json.loads((tmp_path / "memo.sketch.json").read_text())
+    sketch["feel"] = [{"beat": 0, "length": len(sketch["beat_times"]) - 1, "feel": "triplets"}]
+    (tmp_path / "memo.sketch.json").write_text(json.dumps(sketch))
+    cli.main(["render", str(tmp_path / "memo.sketch.json"), "--no-previews"])
+    midi = mido.MidiFile(str(tmp_path / "memo.clean.mid"))
+    signature = next(m for m in midi.tracks[0] if m.type == "time_signature")
+    assert (signature.numerator, signature.denominator) == (12, 8)
+    tempo = next(m for m in midi.tracks[0] if m.type == "set_tempo")
+    assert round(mido.tempo2bpm(tempo.tempo)) == round(sketch["tempo_map"][0]["bpm"] * 1.5)  # dotted-quarter beat

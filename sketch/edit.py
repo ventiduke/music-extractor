@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from .build import as_notes, as_rows, feels_of, grid_of
+from .build import as_notes, as_rows, bpms_of, feels_of, grid_of
 from .parts import PART_NAMES, make_parts
 from .rhythm import runs
+from .tempo import as_sections
 
 ALL_PARTS = ("guitar", *PART_NAMES)
 PITCHED = ("guitar", "bass", "pad")
@@ -115,10 +116,18 @@ def thin(sketch: dict, grid: float | None = None, min_velocity: float | None = N
     return count
 
 
-def tempo(sketch: dict, bpm: float) -> None:
-    """Change the steady tempo (affects the steady MIDI and previews, not the play-along-with-memo ones)."""
-    sketch["tempo_bpm"] = round(float(bpm), 1)
-    _log(sketch, "tempo", bpm=bpm)
+def tempo(sketch: dict, bpm: float, bars=None) -> None:
+    """Set the steady tempo of these bars (default: the whole song, as one section).
+
+    Affects the MIDI and the steady previews, not the play-along-with-memo ones.
+    """
+    start, end = _span(sketch, parse_bars(bars, sketch))
+    bpms = bpms_of(sketch)
+    for beat in range(int(start), min(int(end), len(bpms))):
+        bpms[beat] = round(float(bpm), 1)
+    sketch["tempo_map"] = as_sections(bpms, sketch.get("tempo_map"))
+    sketch["tempo_bpm"] = round(float(np.median(bpms)), 1)
+    _log(sketch, "tempo", bpm=bpm, bars=bars)
 
 
 def _restructure(sketch: dict, start: float, end: float, copies: int) -> None:
@@ -142,8 +151,9 @@ def _restructure(sketch: dict, start: float, end: float, copies: int) -> None:
         else:
             _set(sketch, name, out)
     s, e = int(start), int(end)
-    feels = feels_of(sketch)
+    feels, bpms = feels_of(sketch), bpms_of(sketch)
     sketch["feel"] = runs(feels[:s] + feels[s:e] * copies + feels[e:])
+    sketch["tempo_map"] = as_sections(bpms[:s] + bpms[s:e] * copies + bpms[e:], None)
     gaps = list(np.diff(sketch["beat_times"]))
     gaps = gaps[:s] + gaps[s:e] * copies + gaps[e:]
     sketch["beat_times"] = [round(float(t), 4) for t in np.concatenate([[sketch["beat_times"][0]], sketch["beat_times"][0] + np.cumsum(gaps)])]
@@ -180,10 +190,20 @@ def overview(sketch: dict, bars=None) -> str:
     meter = sketch["meter"]
     feels = feels_of(sketch)
     key = sketch["key"]
+    tempos = sketch.get("tempo_map", [])
+    tempo_text = (
+        f"{tempos[0]['bpm']:g} bpm" if len(tempos) == 1
+        else f"{min(t['bpm'] for t in tempos):g}-{max(t['bpm'] for t in tempos):g} bpm in {len(tempos)} tempo sections"
+    )
     lines = [
-        f"{sketch['source']}: {sketch['tempo_bpm']} bpm, {sketch['time_signature']}, {sketch['bars']} bars, "
-        f"key {key['tonic']} {key['mode']} (bar lines {sketch['downbeat_confidence']:.0%} sure)"
+        f"{sketch['source']}: {tempo_text}, {sketch['time_signature']}, {sketch['bars']} bars, "
+        f"key {key['tonic']} {key['mode']}, beat from {sketch.get('beats_from', 'tracker')}"
+        + ("" if sketch.get("beats_from") == "taps" else f" (bar lines {sketch['downbeat_confidence']:.0%} sure)")
     ]
+    if len(tempos) > 1:
+        for t in tempos:
+            loose = f", timing loose by about {t['looseness_ms']} ms" if "looseness_ms" in t else ""
+            lines.append(f"  tempo: bars {t['bar']}-{t['bar'] + t['bars'] - 1}: {t['bpm']:g} bpm{loose}")
     for bar in range(a, b + 1):
         first, last = (bar - 1) * meter, bar * meter
         spans = [h for h in sketch["harmony"] if h["beat"] < last and h["beat"] + h["length"] > first]

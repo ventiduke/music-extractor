@@ -18,15 +18,14 @@ from extract.preview import write_audio
 from extract.types import NoteEvent, note_name
 
 from . import synth
-from .grid import Grid, find_grid, grid_from_taps
+from .grid import Grid, find_grid, grid_from_taps, strum_onsets, tapped_times
 from .harmony import estimate_key, harmony_spans
 from .parts import HAT, KICK, PART_NAMES, SNARE, make_parts
 from .rhythm import clean, expand, runs, time_signature
+from .tempo import as_sections, best_division, per_beat, steady_times, tempo_sections
 from .tidy import SketchNote, clean_overlaps, tidy
 
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore")
-    import pretty_midi
+import mido
 
 VERSION = 2
 DRUM_NAMES = {KICK: "kick", SNARE: "snare", HAT: "hat"}
@@ -56,6 +55,11 @@ def as_rows(notes: list[SketchNote], grid: Grid, drums: bool = False) -> list[di
     return rows
 
 
+def bpms_of(sketch: dict) -> list[float]:
+    """Steady tempo of every beat, from the sketch's tempo map."""
+    return per_beat(sketch.get("tempo_map", []), len(sketch["beat_times"]) - 1, float(sketch["tempo_bpm"]))
+
+
 def feels_of(sketch: dict) -> list[str]:
     return expand(sketch.get("feel", []), len(sketch["beat_times"]) - 1)
 
@@ -70,10 +74,14 @@ def build(
     result = analyse(audio, engine="model", templates=templates, **kwargs)
     if not result.notes:
         raise SystemExit(f"{audio.name}: no notes found")
-    division = 2
+    division, division_from = 2, "default"
     if beats is not None:
         tapped = json.loads(Path(beats).read_text())
-        division = int(tapped.get("division", 2))
+        division, division_from = int(tapped.get("division", 2)), "taps"
+        # The notes can show the tapped beat dividing in three when "two" was saved (or the reverse).
+        seen, _ = best_division(tapped_times(tapped["taps"]), strum_onsets(result.notes))
+        if seen and seen != division:
+            division, division_from = seen, f"notes (the taps file said {division})"
         grid = grid_from_taps(
             tapped["taps"], result.notes, result.duration,
             meter=meter or int(tapped.get("beats_per_bar", 4)), division=division,
@@ -89,7 +97,10 @@ def build(
         "version": VERSION,
         "source": str(audio),
         "beats_from": "taps" if beats is not None else "tracker",
+        "division": division,
+        "division_from": division_from,
         "tempo_bpm": grid.tempo_bpm,
+        "tempo_map": tempo_sections(grid.beat_times, grid.meter),
         "meter": grid.meter,
         "meter_confidence": grid.meter_confidence,
         "downbeat_confidence": grid.downbeat_confidence,
@@ -115,7 +126,13 @@ def refresh(sketch: dict) -> dict:
         "version": VERSION,
         "source": sketch["source"],
         "beats_from": sketch.get("beats_from", "tracker"),
+        "division": sketch.get("division", 2),
+        "division_from": sketch.get("division_from", "default"),
         "tempo_bpm": sketch["tempo_bpm"],
+        "tempo_map": [
+            {**row, "bar": row["beat"] // grid.meter + 1, "bars": -(-row["length"] // grid.meter)}
+            for row in as_sections(bpms_of(sketch), sketch.get("tempo_map"))
+        ],
         "meter": grid.meter,
         "time_signature": time_signature(grid.meter, feels_of(sketch)),
         "bars": grid.n_bars,
@@ -158,7 +175,7 @@ def write(sketch: dict, path: str | Path) -> Path:
         if key == "parts":
             inner = ",\n".join(f"  {json.dumps(name)}: {rows(part, '  ')}" for name, part in value.items())
             lines.append(f' "parts": {{\n{inner}\n }}' if value else ' "parts": {}')
-        elif key in ("notes", "light_notes", "harmony", "dropped", "feel", "history"):
+        elif key in ("notes", "light_notes", "harmony", "dropped", "feel", "history", "tempo_map"):
             lines.append(f" {json.dumps(key)}: {rows(value, ' ')}")
         else:
             lines.append(f" {json.dumps(key)}: {json.dumps(value)}")
@@ -167,30 +184,53 @@ def write(sketch: dict, path: str | Path) -> Path:
 
 
 def _timed(notes: list[SketchNote], sketch: dict, memo_time: bool) -> list[NoteEvent]:
-    """Sketch notes as timed events: following the memo's own beats, or at the steady tempo."""
-    if memo_time:
-        grid = grid_of(sketch)
-        return [
-            NoteEvent(n.pitch, float(grid.to_time(n.beat)), float(grid.to_time(n.beat + n.length)), n.velocity, 1.0)
-            for n in notes
-        ]
-    per_beat = 60.0 / sketch["tempo_bpm"]
-    return [NoteEvent(n.pitch, n.beat * per_beat, (n.beat + n.length) * per_beat, n.velocity, 1.0) for n in notes]
+    """Sketch notes as timed events: following the memo's own beats, or the steady tempo map."""
+    times = np.asarray(sketch["beat_times"]) if memo_time else steady_times(bpms_of(sketch))
+    index = np.arange(len(times))
+
+    def at(beat: float) -> float:
+        return float(np.interp(beat, index, times))
+
+    return [NoteEvent(n.pitch, at(n.beat), at(n.beat + n.length), n.velocity, 1.0) for n in notes]
 
 
 def write_midi(sketch: dict, tracks: dict[str, list[SketchNote]], path: Path) -> Path:
-    """Steady-tempo MIDI with tempo and time signature set, one track per part, so it drops onto a DAW grid."""
-    midi = pretty_midi.PrettyMIDI(initial_tempo=sketch["tempo_bpm"])
+    """MIDI on the bar grid: time signature set, a tempo change at each tempo section, one track per part.
+
+    Notes are written at their beat positions, so they sit exactly on a DAW's
+    grid. In compound time (6/8, 12/8) a sketch beat is a dotted quarter.
+    """
     top, bottom = (int(x) for x in sketch.get("time_signature", f"{sketch['meter']}/4").split("/"))
-    midi.time_signature_changes.append(pretty_midi.TimeSignature(top, bottom, 0))
-    for name, notes in tracks.items():
+    quarters = 1.5 if bottom == 8 else 1.0  # quarter notes per sketch beat
+    ticks = int(480 * quarters)
+    midi = mido.MidiFile(ticks_per_beat=480)
+    conductor = mido.MidiTrack()
+    conductor.append(mido.MetaMessage("time_signature", numerator=top, denominator=bottom, time=0))
+    at = 0
+    for section in as_sections(bpms_of(sketch)):
+        tick = section["beat"] * ticks
+        conductor.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(section["bpm"] * quarters), time=tick - at))
+        at = tick
+    midi.tracks.append(conductor)
+    for channel, (name, notes) in enumerate(tracks.items()):
         drums = name == "drums"
-        track = pretty_midi.Instrument(program=MIDI_PROGRAMS.get(name, 0), is_drum=drums, name=name.capitalize())
-        for n in _timed(notes, sketch, memo_time=False):
+        channel = 9 if drums else channel + (channel >= 9)
+        track = mido.MidiTrack()
+        track.append(mido.MetaMessage("track_name", name=name.capitalize(), time=0))
+        if not drums:
+            track.append(mido.Message("program_change", program=MIDI_PROGRAMS.get(name, 0), channel=channel, time=0))
+        events = []
+        for n in notes:
             velocity = int(min(127, max(1, round(30 + 97 * n.velocity))))
-            track.notes.append(pretty_midi.Note(velocity=velocity, pitch=n.pitch, start=n.start, end=n.end))
-        midi.instruments.append(track)
-    midi.write(str(path))
+            start, end = int(round(n.beat * ticks)), int(round((n.beat + n.length) * ticks))
+            events.append((start, 1, mido.Message("note_on", note=n.pitch, velocity=velocity, channel=channel)))
+            events.append((max(end, start + 1), 0, mido.Message("note_off", note=n.pitch, velocity=0, channel=channel)))
+        at = 0
+        for tick, _, message in sorted(events, key=lambda e: (e[0], e[1])):
+            track.append(message.copy(time=tick - at))
+            at = tick
+        midi.tracks.append(track)
+    midi.save(str(path))
     return path
 
 
@@ -198,6 +238,7 @@ def render(sketch_path: str | Path, previews: bool = True, light: bool = False) 
     """Write MIDI and (with `previews`) audio next to the sketch.
 
     - NAME.clean.mid / .clean.steady.m4a / .clean.split.m4a: the cleaned guitar line
+      ("steady" follows the tempo map: section tempos kept, wobble inside a section removed)
     - NAME.arr.mid / .arr.steady.m4a / .arr.memo.m4a: guitar plus generated parts
     - with `light`: NAME.tidy.* from the light-touch version, for comparison
     Previews that play along with the memo are skipped once bars have been added or removed.
@@ -225,8 +266,7 @@ def render(sketch_path: str | Path, previews: bool = True, light: bool = False) 
         return synth.mix(raw, under=under)
 
     steady_seconds = max(
-        ((n.beat + n.length) * 60.0 / sketch["tempo_bpm"] for notes in [guitar, *parts.values()] for n in notes),
-        default=1.0,
+        (e.end for notes in [guitar, *parts.values()] for e in _timed(notes, sketch, memo_time=False)), default=1.0
     ) + 0.5
 
     def steady(tracks: dict[str, list[SketchNote]], suffix: str) -> Path:
