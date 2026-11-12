@@ -96,6 +96,7 @@ tap the beat, and build a song from it, all in the browser. Nothing is uploaded.
 - **Sound.** 23 sampled instruments and 5 drum kits, with volume, pan, reverb, mute and solo per track. Export audio (WAV) or MIDI.
 - **Tools.** Write a bass line, pad, arpeggio, strummed part or drum part that follows the chord lane; snap, loosen, join, transpose or harmonize what is selected.
 - **Chords, scales, patterns, keys.** Draw with chords from your recording or from the scale; save riffs as patterns to stamp elsewhere; play notes from the computer keyboard (press Q).
+- **Finish it.** *Finish it in Suno…* gives you the audio and a style prompt written from your song, ready for an audio cover tool that re-produces it with real-sounding instruments.
 - **Assistant.** Describe a change in words. With your own Claude API key it is applied for you; without one, copy the request into any Claude chat and paste the reply back.
 
 It is a static site with no build step. Songs and edits are kept in your browser; use *Save a song file* to keep or share one.

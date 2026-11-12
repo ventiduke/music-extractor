@@ -64,3 +64,12 @@ test("the Claude skill carries an exact copy of the editor's song code", async (
   for (const f of ["model.js", "tools.js", "ops.js", "midi.js"])
     assert.equal(readFileSync(new URL(`../../../.claude/skills/song-workbench/lib/${f}`, import.meta.url), "utf8"), readFileSync(new URL(`../${f}`, import.meta.url), "utf8"), `${f} is out of date: run node tools/sync_skill.mjs`);
 });
+
+test("the style prompt for a cover tool is written from the song", async () => {
+  const { stylePrompt } = await import("../brief.js");
+  const p = song(); applyOps(p, [{ op: "generate", part: "drums", track: "Drums" }, { op: "add_track", name: "Empty", instrument: "flute" }]);
+  p.scales = [{ name: "E major", tonic: 4, pitch_classes: [1, 3, 4, 6, 8, 9, 11] }];
+  assert.equal(stylePrompt(p, "warm indie folk, intimate.", { steel: "Steel guitar" }), "warm indie folk, intimate. instrumental, no vocals. steel guitar, drums. E major, 4/4, about 100 bpm.");
+  applyOps(p, [{ op: "set_tempo", bpm: 130, bars: [5, 8] }, { op: "set_signature", beats: 2, division: 3 }, { op: "set_track", track: "Drums", mute: true }]);
+  assert.equal(stylePrompt(p), "instrumental, no vocals. steel. E major, 6/8 with a lilting triplet feel, tempo building from 100 to 130 bpm.");
+});
